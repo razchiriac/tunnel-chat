@@ -5,7 +5,7 @@ import { createUI } from './ui.js';
 import { TunnelPeer } from './peer.js';
 
 const DEFAULT_SIGNAL =
-  process.env.TUNNEL_SIGNAL ?? 'wss://tunnel-chat.fly.dev';
+  process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 
 const program = new Command();
 
