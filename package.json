@@ -1,0 +1,36 @@
+{
+  "name": "tunnel-chat",
+  "version": "1.0.8",
+  "description": "Ephemeral peer-to-peer tunnel chat from the terminal",
+  "type": "module",
+  "bin": {
+    "open-tunnel": "dist/cli/open-tunnel.js",
+    "tunnel-chat": "dist/cli/open-tunnel.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx cli/open-tunnel.ts",
+    "server": "tsx server/server.ts",
+    "prepublishOnly": "pnpm run build"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@roamhq/wrtc": "^0.9.0",
+    "commander": "^14.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "license": "MIT"
+}
