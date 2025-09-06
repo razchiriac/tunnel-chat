@@ -2,7 +2,7 @@
 import wrtc from '@roamhq/wrtc';
 import WebSocket from 'ws';
 
-const { RTCPeerConnection, RTCDataChannel } = wrtc as any;
+const { RTCPeerConnection, RTCDataChannel } = (wrtc as any);
 
 type Role = 'creator' | 'joiner';
 
@@ -38,12 +38,12 @@ const rtcConfig: RTCConfiguration = {
 const JOIN_RETRY_TOTAL_MS = Number(process.env.JOIN_RETRY_TOTAL_MS || 15_000);
 const JOIN_RETRY_BASE_MS  = Number(process.env.JOIN_RETRY_BASE_MS  || 600);
 
-const WATCH_CONNECT_MS    = Number(process.env.WATCH_CONNECT_MS    || 12_000); // after offer
-const KEEPALIVE_MS        = Number(process.env.KEEPALIVE_MS        || 10_000);
-const KEEPALIVE_TIMEOUT_MS= Number(process.env.KEEPALIVE_TIMEOUT_MS|| 5_000);
-const KEEPALIVE_MISS_MAX  = Number(process.env.KEEPALIVE_MISS_MAX  || 3);
+const WATCH_CONNECT_MS     = Number(process.env.WATCH_CONNECT_MS     || 12_000); // after offer
+const KEEPALIVE_MS         = Number(process.env.KEEPALIVE_MS         || 10_000);
+const KEEPALIVE_TIMEOUT_MS = Number(process.env.KEEPALIVE_TIMEOUT_MS || 5_000);
+const KEEPALIVE_MISS_MAX   = Number(process.env.KEEPALIVE_MISS_MAX   || 3);
 
-const CTRL_PREFIX = '\x00'; // control frames start with NUL (not shown in UI)
+const CTRL_PREFIX = '\x00'; // control frames start with NUL (hidden from UI)
 
 export class TunnelPeer {
   private pc: RTCPeerConnection;
@@ -52,7 +52,7 @@ export class TunnelPeer {
   private opts: PeerOpts;
 
   private inactivityTimer?: NodeJS.Timeout;
-  private readonly INACTIVITY_MS = 15 * 60 * 1000;
+  private readonly INACTIVITY_MS = 2 * 60 * 1000;
 
   // state flags
   private disposed = false;
@@ -96,12 +96,10 @@ export class TunnelPeer {
         this.stopJoinLoop();
         this.clearWatch();
         this.startKeepalive();
-        this.onActivity();
+        this.onActivity(); // once on connect
         this.opts.onOpen();
       } else if (s === 'failed' || s === 'disconnected') {
-        // Let keepalive/watchdog handle recovery for joiner
         if (this.opts.role === 'creator') {
-          // creators attempt a one-time ICE restart; no full restart to avoid 'room_exists'
           if (!this.iceRestarted && this.hasRemoteOffer) {
             this.iceRestarted = true;
             this.opts.onStatus('attempting ICE restart…');
@@ -140,12 +138,17 @@ export class TunnelPeer {
   private wireChannel(dc: RTCDataChannel) {
     dc.onopen = () => this.opts.onStatus('data channel open');
     dc.onmessage = (ev: MessageEvent) => {
-      this.onActivity();
       const data = ev.data;
+
+      // IMPORTANT: handle control BEFORE counting activity
       if (typeof data === 'string' && data.startsWith(CTRL_PREFIX)) {
         this.handleControl(data.slice(1));
-        return;
+        return; // do NOT call onActivity() for control frames
       }
+
+      // Only real user messages reset inactivity
+      this.onActivity();
+
       const text = typeof data === 'string' ? data : '[binary]';
       this.opts.onMessage(text);
     };
@@ -280,8 +283,7 @@ export class TunnelPeer {
         this.iceRestarted = true;
         this.opts.onStatus('connection slow, attempting ICE restart…');
         await this.restartIce().catch(() => {});
-        // set another watch; if still no connect, do full restart
-        this.startConnectWatch();
+        this.startConnectWatch(); // re-arm
       } else if (!this.didFullRestart) {
         this.didFullRestart = true;
         this.opts.onStatus('still not connected, performing full restart…');
@@ -294,7 +296,7 @@ export class TunnelPeer {
     if (this.connectWatch) { clearTimeout(this.connectWatch); this.connectWatch = undefined; }
   }
 
-  // ===== Keepalive on DC ==============================================
+  // ===== Keepalive on DC (no activity bump) ===========================
   private startKeepalive() {
     this.stopKeepalive();
     if (!this.dc) return;
@@ -322,10 +324,8 @@ export class TunnelPeer {
 
   private handleControl(cmd: string) {
     if (cmd === 'PING') {
-      // reply quickly
       try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {}
     } else if (cmd === 'PONG') {
-      // got pong — cancel timeout & reset misses
       if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; }
       this.kaMisses = 0;
     }
@@ -334,7 +334,7 @@ export class TunnelPeer {
   // ===== ICE restart & full restart (joiner) ==========================
   private async restartIce() {
     try {
-      await this.pc.setConfiguration?.({ ...rtcConfig, iceTransportPolicy: rtcConfig.iceTransportPolicy });
+      await (this.pc as any).setConfiguration?.({ ...rtcConfig, iceTransportPolicy: rtcConfig.iceTransportPolicy });
       const offer = await this.pc.createOffer({ iceRestart: true });
       await this.pc.setLocalDescription(offer);
       await this.waitForIceGatheringComplete();
@@ -343,7 +343,7 @@ export class TunnelPeer {
         this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
         this.opts.onStatus('reposted offer after ICE restart');
       } else {
-        this.safeSend({ type: 'join', name: this.opts.name }); // poke server for fresh offer if needed
+        this.safeSend({ type: 'join', name: this.opts.name });
         this.opts.onStatus('requested fresh offer after ICE restart');
       }
     } catch (e) {
@@ -354,7 +354,6 @@ export class TunnelPeer {
   // Full RTCPeerConnection rebuild for joiner
   private async fullRestartJoiner() {
     if (this.opts.role !== 'joiner') return;
-    // tear down PC/DC but keep WS
     try { this.dc?.close(); } catch {}
     try { this.pc.close(); } catch {}
 
