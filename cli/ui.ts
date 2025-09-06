@@ -1,5 +1,19 @@
 import readline from 'readline';
 
+// Use the terminal's alternate screen so no scrollback remains.
+function enterAltScreen() {
+  // 1049h = use alt buffer, H = move cursor home
+  process.stdout.write('\x1b[?1049h\x1b[H');
+  // clear scrollback just in case
+  process.stdout.write('\x1b[3J');
+}
+function leaveAltScreen() {
+  // clear screen + scrollback, move home
+  process.stdout.write('\x1b[2J\x1b[3J\x1b[0f');
+  // 1049l = leave alt buffer
+  process.stdout.write('\x1b[?1049l');
+}
+
 // ==== tiny color helpers (no deps) ====
 const C = {
   reset: '\x1b[0m',
@@ -216,8 +230,9 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
     try { process.stdout.removeListener('resize', onResize); } catch {}
     try { (process.stdin as any).removeListener('keypress', onKeypress); } catch {}
     try { rl.close(); } catch {}
-    try { process.stdout.write('\x1b[2J\x1b[0f'); } catch {}
+
     try { process.stdout.write('\x1b[?25h'); } catch {} // show cursor
+    try { leaveAltScreen(); } catch {}
     process.exit(0);
   }
 
@@ -231,6 +246,13 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
     }, 1000);
   }
 
+  const safeExit = () => cleanupAndExit();
+  process.on('SIGINT', safeExit);
+  process.on('SIGTERM', safeExit);
+  process.on('uncaughtException', (e) => { try { console.error(e?.message || e); } catch {} finally { safeExit(); } });
+  process.on('exit', () => { try { leaveAltScreen(); } catch {} });
+
+  enterAltScreen();
   // initial paint
   render();
 
