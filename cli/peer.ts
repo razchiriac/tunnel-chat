@@ -66,7 +66,7 @@ export class TunnelPeer {
         this.onActivity(); // start inactivity timer
         this.opts.onOpen();
       } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
-        this.close();
+        this.opts.onStatus('connection ${s}');
       }
     };
 
@@ -101,6 +101,9 @@ export class TunnelPeer {
     this.ws.on('open', () => this.startSignaling());
     this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
     this.ws.on('close', () => { /* no-op */ });
+    this.ws.on('error', (err) => {
+      this.opts.onStatus(`signaling error: ${(err as Error).message || err}`);
+    });
   }
 
   private wireChannel(dc: RTCDataChannel) {
@@ -130,8 +133,8 @@ export class TunnelPeer {
   private async onSignal(msg: any) {
     if (msg.type === 'created') return; // ack
     if (msg.type === 'not_found' && this.opts.role === 'joiner') {
-      this.opts.onStatus(`tunnel "${this.opts.name}" not found.`);
-      this.close();
+      this.opts.onStatus(`tunnel "${this.opts.name}" not found. (Check the tunnel name and try again.)`);
+      // keep the ui alive
       return;
     }
     if (msg.type === 'offer' && this.opts.role === 'joiner') {

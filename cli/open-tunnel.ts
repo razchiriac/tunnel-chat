@@ -32,7 +32,7 @@ using signaling: ${opts.signal}
 Waiting for peer…`
       );
     } else {
-      ui.setStatus(`joining "${name}" … using signaling: ${opts.signal}`);
+      ui.setStatus(`joining "${name}" … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
     }
 
     const peer = new TunnelPeer({
@@ -42,13 +42,18 @@ Waiting for peer…`
       onOpen: () => ui.setStatus(`connected on "${name}". Only last message is displayed.`),
       onMessage: (text) => ui.showRemote('peer', text),
       onStatus: (text) => ui.setStatus(text),
-      onClose: () => ui.close(),
+      onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
       onIce: (state) => ui.setIceState(state),
       onTickInactivity: (ms) => ui.resetInactivity(ms)
     });
 
     ui.promptInput((line) => {
       if (!line) return;
+      if (line.trim() === 'r' && role === 'joiner') {
+        peer['ws'].send(JSON.stringify({ type: 'join', name }));
+        ui.setStatus(`retrying to join "${name}" …`);
+        return;
+      }
       const ok = peer.send(line);
       if (!ok) ui.setStatus('channel not open yet…');
       else ui.showLocal('you', line);

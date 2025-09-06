@@ -152,7 +152,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
     moveTo(2, 2); process.stdout.write(padRight(`${C.dim}status:${C.reset} ${status}`, totalW - 4));
     moveTo(2, 3);
     if (role === 'creator' && !connected) {
-      process.stdout.write(padRight(`${C.dim}share:${C.reset} npx tunnel-chat ${C.bold}${C.fg.magenta}${tunnelName}${C.reset}`, totalW - 4));
+      process.stdout.write(padRight(`${C.dim}share:${C.reset} npx tunnel-chat@latest ${C.bold}${C.fg.magenta}${tunnelName}${C.reset}`, totalW - 4));
     } else {
       process.stdout.write(padRight(' ', totalW - 4));
     }
