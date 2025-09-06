@@ -28,7 +28,7 @@ program
       ui.setStatus(
         `tunnel: ${name} (creator).
 Share with your peer:
-  npx tunnel-chat ${name}
+  npx tunnel-chat@latest ${name}
 Waiting for peer…`
       );
     }

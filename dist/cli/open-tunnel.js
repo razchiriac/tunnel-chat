@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { autoName } from './name.js';
 import { createUI } from './ui.js';
 import { TunnelPeer } from './peer.js';
-const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://tunnel-chat.fly.dev';
+const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 const program = new Command();
 program
     .name('tunnel-chat')
