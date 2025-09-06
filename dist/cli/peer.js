@@ -2,11 +2,25 @@
 import wrtc from '@roamhq/wrtc';
 import WebSocket from 'ws';
 const { RTCPeerConnection, RTCDataChannel } = wrtc;
-// Use public STUN for MVP.
-// (Traffic remains E2E encrypted over DTLS even if a relay is used.)
+// ---- ICE / TURN config (env-driven) ----------------------------------
+// Optional TURN for strict NATs (set on both peers when needed):
+//   TURN_URL="turn:turn.example.com:3478?transport=udp"
+//   TURN_USER="demo"
+//   TURN_CRED="demoPass123"
+// To force relaying (bypass direct P2P), set: FORCE_RELAY=1
+const TURN_URL = process.env.TURN_URL;
+const TURN_USER = process.env.TURN_USER;
+const TURN_CRED = process.env.TURN_CRED;
+const iceServers = [
+    { urls: ['stun:stun.l.google.com:19302'] }
+];
+if (TURN_URL && TURN_USER && TURN_CRED) {
+    iceServers.push({ urls: [TURN_URL], username: TURN_USER, credential: TURN_CRED });
+}
 const rtcConfig = {
-    iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-    iceCandidatePoolSize: 8
+    iceServers,
+    iceCandidatePoolSize: 8,
+    iceTransportPolicy: process.env.FORCE_RELAY ? 'relay' : 'all'
 };
 export class TunnelPeer {
     pc;
@@ -19,18 +33,35 @@ export class TunnelPeer {
         this.opts = opts;
         this.pc = new RTCPeerConnection(rtcConfig);
         this.ws = new WebSocket(opts.signalingURL);
+        // ---- Connection state (overall) -----------------------------------
         this.pc.onconnectionstatechange = () => {
             const s = this.pc.connectionState;
+            this.opts.onStatus(`connection: ${s}`);
+            this.opts.onIce?.(this.pc.iceConnectionState); // keep UI in sync
             if (s === 'connected') {
-                this.opts.onStatus(`connected to ${opts.name}`);
-                this.onActivity();
+                this.onActivity(); // start inactivity timer
                 this.opts.onOpen();
             }
             else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
-                this.opts.onStatus(`connection ${s}`);
                 this.close();
             }
         };
+        // ---- ICE visibility (for UI indicator / debugging) ----------------
+        this.pc.oniceconnectionstatechange = () => {
+            const s = this.pc.iceConnectionState;
+            this.opts.onStatus(`ICE state: ${s}`);
+            this.opts.onIce?.(s);
+            if (s === 'connected' || s === 'completed')
+                this.onActivity();
+        };
+        this.pc.onicegatheringstatechange = () => {
+            this.opts.onStatus(`ICE gathering: ${this.pc.iceGatheringState}`);
+        };
+        this.pc.onicecandidate = (ev) => {
+            if (!ev.candidate)
+                this.opts.onStatus('ICE gathering complete');
+        };
+        // ---- DataChannel setup --------------------------------------------
         if (opts.role === 'creator') {
             this.dc = this.pc.createDataChannel('tunnel', { negotiated: false });
             this.wireChannel(this.dc);
@@ -41,6 +72,7 @@ export class TunnelPeer {
                 this.wireChannel(this.dc);
             };
         }
+        // ---- Signaling WS --------------------------------------------------
         this.ws.on('open', () => this.startSignaling());
         this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
         this.ws.on('close', () => { });
@@ -82,10 +114,12 @@ export class TunnelPeer {
             await this.pc.setLocalDescription(answer);
             await this.waitForIceGatheringComplete();
             this.ws.send(JSON.stringify({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp }));
+            this.opts.onStatus('sent answer');
             return;
         }
         if (msg.type === 'answer' && this.opts.role === 'creator') {
             await this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+            this.opts.onStatus('received answer');
             return;
         }
     }
@@ -111,6 +145,8 @@ export class TunnelPeer {
         return false;
     }
     onActivity() {
+        // Notify UI to reset its countdown
+        this.opts.onTickInactivity?.(this.INACTIVITY_MS);
         if (this.inactivityTimer)
             clearTimeout(this.inactivityTimer);
         this.inactivityTimer = setTimeout(() => {
