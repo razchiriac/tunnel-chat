@@ -14,18 +14,11 @@ export type PeerOpts = {
   onMessage: (text: string) => void;
   onStatus: (text: string) => void;
   onClose: () => void;
-
-  // NEW: drive UI indicator + countdown
   onIce?: (state: string) => void;
   onTickInactivity?: (totalMs: number) => void;
 };
 
-// ---- ICE / TURN config (env-driven) ----------------------------------
-// Optional TURN for strict NATs (set on both peers when needed):
-//   TURN_URL="turn:turn.example.com:3478?transport=udp"
-//   TURN_USER="demo"
-//   TURN_CRED="demoPass123"
-// To force relaying (bypass direct P2P), set: FORCE_RELAY=1
+// ---- ICE / TURN config (env-driven) ----
 const TURN_URL  = process.env.TURN_URL;
 const TURN_USER = process.env.TURN_USER;
 const TURN_CRED = process.env.TURN_CRED;
@@ -43,34 +36,50 @@ const rtcConfig: RTCConfiguration = {
   iceTransportPolicy: process.env.FORCE_RELAY ? 'relay' : 'all'
 };
 
+// join retry/backoff
+const JOIN_RETRY_TOTAL_MS = Number(process.env.JOIN_RETRY_TOTAL_MS || 15_000);
+const JOIN_RETRY_BASE_MS  = Number(process.env.JOIN_RETRY_BASE_MS  || 600);
+
 export class TunnelPeer {
   private pc: RTCPeerConnection;
   private dc?: RTCDataChannel;
-  private ws: WebSocket;
+  private ws!: WebSocket;
   private opts: PeerOpts;
   private inactivityTimer?: NodeJS.Timeout;
   private readonly INACTIVITY_MS = 15 * 60 * 1000; // 15 minutes
 
+  private wsReconnects = 0;
+  private joinedOnce = false;
+  private iceRestarted = false;
+  private disposed = false;
+
   constructor(opts: PeerOpts) {
     this.opts = opts;
     this.pc = new RTCPeerConnection(rtcConfig as any);
-    this.ws = new WebSocket(opts.signalingURL);
+    this.attachPeerHandlers();
+    this.connectWS(); // lazy; will (re)connect
+  }
 
-    // ---- Connection state (overall) -----------------------------------
+  // ----- Peer event wiring -----
+  private attachPeerHandlers() {
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
       this.opts.onStatus(`connection: ${s}`);
-      this.opts.onIce?.(this.pc.iceConnectionState); // keep UI in sync
+      this.opts.onIce?.(this.pc.iceConnectionState);
 
       if (s === 'connected') {
-        this.onActivity(); // start inactivity timer
+        this.onActivity();
         this.opts.onOpen();
-      } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
-        this.opts.onStatus('connection ${s}');
+      } else if (s === 'failed' || s === 'disconnected') {
+        // one-time ICE restart attempt to heal transient NAT hiccups
+        if (!this.iceRestarted) {
+          this.iceRestarted = true;
+          this.opts.onStatus('attempting ICE restart…');
+          this.restartIce().catch(() => {});
+        }
       }
     };
 
-    // ---- ICE visibility (for UI indicator / debugging) ----------------
     this.pc.oniceconnectionstatechange = () => {
       const s = this.pc.iceConnectionState;
       this.opts.onStatus(`ICE state: ${s}`);
@@ -86,8 +95,7 @@ export class TunnelPeer {
       if (!ev.candidate) this.opts.onStatus('ICE gathering complete');
     };
 
-    // ---- DataChannel setup --------------------------------------------
-    if (opts.role === 'creator') {
+    if (this.opts.role === 'creator') {
       this.dc = this.pc.createDataChannel('tunnel', { negotiated: false });
       this.wireChannel(this.dc);
     } else {
@@ -96,14 +104,6 @@ export class TunnelPeer {
         this.wireChannel(this.dc);
       };
     }
-
-    // ---- Signaling WS --------------------------------------------------
-    this.ws.on('open', () => this.startSignaling());
-    this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
-    this.ws.on('close', () => { /* no-op */ });
-    this.ws.on('error', (err) => {
-      this.opts.onStatus(`signaling error: ${(err as Error).message || err}`);
-    });
   }
 
   private wireChannel(dc: RTCDataChannel) {
@@ -117,32 +117,76 @@ export class TunnelPeer {
     dc.onerror = () => this.opts.onStatus('data channel error');
   }
 
+  // ----- WS connect/reconnect -----
+  private connectWS() {
+    if (this.disposed) return;
+    this.ws = new WebSocket(this.opts.signalingURL);
+    this.ws.on('open', () => {
+      this.wsReconnects = 0;
+      this.startSignaling();
+    });
+    this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
+    this.ws.on('error', (err) => {
+      this.opts.onStatus(`signaling error: ${(err as Error).message || err}`);
+    });
+    this.ws.on('close', () => {
+      if (this.disposed) return;
+      // backoff reconnect for signaling
+      const delay = Math.min(2000 + this.wsReconnects * 500, 4000);
+      this.wsReconnects++;
+      setTimeout(() => this.connectWS(), delay);
+    });
+  }
+
+  // ----- Signaling flow -----
   private async startSignaling() {
     if (this.opts.role === 'creator') {
       const offer = await this.pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
       await this.pc.setLocalDescription(offer);
       await this.waitForIceGatheringComplete();
-      this.ws.send(JSON.stringify({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp }));
+      this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus(`waiting for a peer to join "${this.opts.name}" …`);
     } else {
-      this.ws.send(JSON.stringify({ type: 'join', name: this.opts.name }));
-      this.opts.onStatus(`joining "${this.opts.name}" …`);
+      this.joinWithRetry();
     }
   }
 
+  private joinWithRetry() {
+    const started = Date.now();
+    let attempt = 0;
+
+    const tick = () => {
+      if (this.disposed) return;
+      const elapsed = Date.now() - started;
+      if (elapsed > JOIN_RETRY_TOTAL_MS) {
+        // final attempt
+        this.safeSend({ type: 'join', name: this.opts.name });
+        this.opts.onStatus(`joining "${this.opts.name}" … (last attempt)`);
+        return;
+      }
+      this.safeSend({ type: 'join', name: this.opts.name });
+      const delay = Math.min(JOIN_RETRY_BASE_MS * Math.pow(1.4, attempt++), 2000);
+      this.opts.onStatus(`joining "${this.opts.name}" … (retry in ${Math.ceil(delay/100)/10}s)`);
+      setTimeout(tick, delay);
+    };
+
+    tick();
+  }
+
   private async onSignal(msg: any) {
-    if (msg.type === 'created') return; // ack
+    if (msg.type === 'created') return;
     if (msg.type === 'not_found' && this.opts.role === 'joiner') {
-      this.opts.onStatus(`tunnel "${this.opts.name}" not found. (Check the tunnel name and try again.)`);
-      // keep the ui alive
+      // keep waiting — server will hold us for JOIN_WAIT_MS but we also retry client-side
+      this.opts.onStatus(`tunnel "${this.opts.name}" not found yet…`);
       return;
     }
     if (msg.type === 'offer' && this.opts.role === 'joiner') {
+      this.joinedOnce = true;
       await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
       await this.waitForIceGatheringComplete();
-      this.ws.send(JSON.stringify({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp }));
+      this.safeSend({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus('sent answer');
       return;
     }
@@ -166,6 +210,36 @@ export class TunnelPeer {
     });
   }
 
+  private safeSend(obj: any) {
+    try {
+      if (this.ws && (this.ws as any).readyState === this.ws.OPEN) {
+        this.ws.send(JSON.stringify(obj));
+      }
+    } catch {}
+  }
+
+  // One-time ICE restart attempt
+  private async restartIce() {
+    try {
+      await this.pc.setConfiguration?.({ ...rtcConfig, iceTransportPolicy: rtcConfig.iceTransportPolicy });
+      const offer = await this.pc.createOffer({ iceRestart: true });
+      await this.pc.setLocalDescription(offer);
+      await this.waitForIceGatheringComplete();
+
+      if (this.opts.role === 'creator') {
+        this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
+        this.opts.onStatus('reposted offer after ICE restart');
+      } else {
+        // We can’t “join” again for the same name once creator exists; signaler will resend offer to us if needed.
+        // For simplicity: request a fresh offer by pinging join again (server will ignore if room active).
+        this.safeSend({ type: 'join', name: this.opts.name });
+        this.opts.onStatus('requested fresh offer after ICE restart');
+      }
+    } catch (e) {
+      this.opts.onStatus(`ICE restart failed: ${(e as Error).message || e}`);
+    }
+  }
+
   send(text: string) {
     if (this.dc?.readyState === 'open') {
       this.dc.send(text);
@@ -176,9 +250,7 @@ export class TunnelPeer {
   }
 
   private onActivity() {
-    // Notify UI to reset its countdown
     this.opts.onTickInactivity?.(this.INACTIVITY_MS);
-
     if (this.inactivityTimer) clearTimeout(this.inactivityTimer);
     this.inactivityTimer = setTimeout(() => {
       this.opts.onStatus('closing due to inactivity');
@@ -187,9 +259,10 @@ export class TunnelPeer {
   }
 
   close() {
+    this.disposed = true;
     try { this.dc?.close(); } catch {}
     try { this.pc.close(); } catch {}
-    try { this.ws.close(); } catch {}
+    try { this.ws?.close(); } catch {}
     this.opts.onClose();
   }
 }
