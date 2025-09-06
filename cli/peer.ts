@@ -45,19 +45,28 @@ export class TunnelPeer {
   private dc?: RTCDataChannel;
   private ws!: WebSocket;
   private opts: PeerOpts;
-  private inactivityTimer?: NodeJS.Timeout;
-  private readonly INACTIVITY_MS = 15 * 60 * 1000; // 15 minutes
 
-  private wsReconnects = 0;
-  private joinedOnce = false;
-  private iceRestarted = false;
+  private inactivityTimer?: NodeJS.Timeout;
+  private readonly INACTIVITY_MS = 15 * 60 * 1000;
+
+  // connection/join state
   private disposed = false;
+  private wsReconnects = 0;
+  private iceRestarted = false;
+
+  private isConnected = false;
+  private hasRemoteOffer = false;
+
+  private joinActive = false;
+  private joinStart = 0;
+  private joinAttempt = 0;
+  private joinTimer?: NodeJS.Timeout;
 
   constructor(opts: PeerOpts) {
     this.opts = opts;
     this.pc = new RTCPeerConnection(rtcConfig as any);
     this.attachPeerHandlers();
-    this.connectWS(); // lazy; will (re)connect
+    this.connectWS();
   }
 
   // ----- Peer event wiring -----
@@ -68,11 +77,13 @@ export class TunnelPeer {
       this.opts.onIce?.(this.pc.iceConnectionState);
 
       if (s === 'connected') {
+        this.isConnected = true;
+        this.stopJoinLoop(); // no more join status after connect
         this.onActivity();
         this.opts.onOpen();
       } else if (s === 'failed' || s === 'disconnected') {
         // one-time ICE restart attempt to heal transient NAT hiccups
-        if (!this.iceRestarted) {
+        if (!this.iceRestarted && this.hasRemoteOffer) {
           this.iceRestarted = true;
           this.opts.onStatus('attempting ICE restart…');
           this.restartIce().catch(() => {});
@@ -131,7 +142,8 @@ export class TunnelPeer {
     });
     this.ws.on('close', () => {
       if (this.disposed) return;
-      // backoff reconnect for signaling
+      // Only reconnect the signal socket if we still need it (i.e., not connected yet)
+      if (this.isConnected) return;
       const delay = Math.min(2000 + this.wsReconnects * 500, 4000);
       this.wsReconnects++;
       setTimeout(() => this.connectWS(), delay);
@@ -147,41 +159,62 @@ export class TunnelPeer {
       this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus(`waiting for a peer to join "${this.opts.name}" …`);
     } else {
-      this.joinWithRetry();
+      this.startJoinLoop();
     }
   }
 
-  private joinWithRetry() {
-    const started = Date.now();
-    let attempt = 0;
+  // join retry loop (cancellable)
+  private startJoinLoop() {
+    this.stopJoinLoop();
+    this.joinActive = true;
+    this.joinStart = Date.now();
+    this.joinAttempt = 0;
 
     const tick = () => {
-      if (this.disposed) return;
-      const elapsed = Date.now() - started;
+      if (!this.joinActive || this.disposed || this.isConnected || this.hasRemoteOffer) return;
+      const elapsed = Date.now() - this.joinStart;
       if (elapsed > JOIN_RETRY_TOTAL_MS) {
         // final attempt
         this.safeSend({ type: 'join', name: this.opts.name });
         this.opts.onStatus(`joining "${this.opts.name}" … (last attempt)`);
+        this.stopJoinLoop(); // we did our last attempt; future updates depend on server reply
         return;
       }
       this.safeSend({ type: 'join', name: this.opts.name });
-      const delay = Math.min(JOIN_RETRY_BASE_MS * Math.pow(1.4, attempt++), 2000);
-      this.opts.onStatus(`joining "${this.opts.name}" … (retry in ${Math.ceil(delay/100)/10}s)`);
-      setTimeout(tick, delay);
+      const delay = Math.min(JOIN_RETRY_BASE_MS * Math.pow(1.4, this.joinAttempt++), 2000);
+      // only show retry status while still actually joining
+      if (!this.hasRemoteOffer && !this.isConnected) {
+        this.opts.onStatus(`joining "${this.opts.name}" … (retry in ${Math.ceil(delay/100)/10}s)`);
+      }
+      this.joinTimer = setTimeout(tick, delay);
     };
 
-    tick();
+    // kick off immediately
+    this.joinTimer = setTimeout(tick, 0);
+  }
+
+  private stopJoinLoop() {
+    this.joinActive = false;
+    if (this.joinTimer) {
+      clearTimeout(this.joinTimer);
+      this.joinTimer = undefined;
+    }
   }
 
   private async onSignal(msg: any) {
     if (msg.type === 'created') return;
+
+    // Ignore stale not_found if we've already progressed
     if (msg.type === 'not_found' && this.opts.role === 'joiner') {
-      // keep waiting — server will hold us for JOIN_WAIT_MS but we also retry client-side
+      if (this.hasRemoteOffer || this.isConnected) return; // stale—ignore
+      // still joining; keep UI gentle
       this.opts.onStatus(`tunnel "${this.opts.name}" not found yet…`);
       return;
     }
+
     if (msg.type === 'offer' && this.opts.role === 'joiner') {
-      this.joinedOnce = true;
+      this.hasRemoteOffer = true;
+      this.stopJoinLoop(); // stop further join status updates
       await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
@@ -190,6 +223,7 @@ export class TunnelPeer {
       this.opts.onStatus('sent answer');
       return;
     }
+
     if (msg.type === 'answer' && this.opts.role === 'creator') {
       await this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
       this.opts.onStatus('received answer');
@@ -230,8 +264,7 @@ export class TunnelPeer {
         this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
         this.opts.onStatus('reposted offer after ICE restart');
       } else {
-        // We can’t “join” again for the same name once creator exists; signaler will resend offer to us if needed.
-        // For simplicity: request a fresh offer by pinging join again (server will ignore if room active).
+        // Ask signaler for a fresh offer if needed
         this.safeSend({ type: 'join', name: this.opts.name });
         this.opts.onStatus('requested fresh offer after ICE restart');
       }
@@ -260,6 +293,7 @@ export class TunnelPeer {
 
   close() {
     this.disposed = true;
+    this.stopJoinLoop();
     try { this.dc?.close(); } catch {}
     try { this.pc.close(); } catch {}
     try { this.ws?.close(); } catch {}
