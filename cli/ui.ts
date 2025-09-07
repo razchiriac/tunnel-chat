@@ -91,6 +91,13 @@ function iceIndicator(ice: string): { dot: string; label: string } {
 }
 
 export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
+  // Check if user has pro subscription by looking for TUNNEL_KEY environment variable
+  const hasProSubscription = !!process.env.TUNNEL_KEY;
+  // Create colored title - highlight "Pro" with gold/yellow color for premium feel
+  const appTitle = hasProSubscription
+    ? `Tunnel Chat ${C.fg.yellow}${C.bold}Pro${C.reset}${C.bold}${C.fg.white}`
+    : 'Tunnel Chat';
+
   // State
   let status = `${C.fg.yellow}waiting…${C.reset}`;
   let peerMsg = '';
@@ -156,8 +163,8 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
     const ind = iceIndicator(iceState);
     const connected = iceState === 'connected' || iceState === 'completed';
 
-    // Title/status
-    drawBox(0, 0, totalW, titleH, `${C.bold}${C.fg.white}Tunnel Chat${C.reset}`);
+    // Title/status - show "Tunnel Chat Pro" for users with pro subscription
+    drawBox(0, 0, totalW, titleH, `${C.bold}${C.fg.white}${appTitle}${C.reset}`);
     const brand = `${C.bold}${C.fg.cyan}ditch.chat${C.reset}`;
     const tunnel = `${C.dim}tunnel:${C.reset} ${C.fg.magenta}${tunnelName}${C.reset}`;
     const roleStr = `${C.dim}role:${C.reset} ${role === 'creator' ? C.fg.green + 'creator' : C.fg.blue + 'joiner'}${C.reset}`;
@@ -177,7 +184,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
     drawBox(rightX, y0, paneW, paneH, `${C.bold}${C.fg.green}You${C.reset}`);
     const innerW = paneW - 2, innerH = paneH - 2;
     const peerLines = wrapText(peerMsg || '—', innerW).slice(-innerH);
-    const youLines  = wrapText(youMsg  || '—', innerW).slice(-innerH);
+    const youLines = wrapText(youMsg || '—', innerW).slice(-innerH);
     for (let i = 0; i < innerH; i++) { moveTo(leftX + 1, y0 + 1 + i); process.stdout.write(padRight(peerLines[i] ?? '', innerW)); }
     for (let i = 0; i < innerH; i++) { moveTo(rightX + 1, y0 + 1 + i); process.stdout.write(padRight(youLines[i] ?? '', innerW)); }
 
@@ -227,12 +234,12 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
   function cleanupAndExit() {
     if (disposed) return;
     disposed = true;
-    try { process.stdout.removeListener('resize', onResize); } catch {}
-    try { (process.stdin as any).removeListener('keypress', onKeypress); } catch {}
-    try { rl.close(); } catch {}
+    try { process.stdout.removeListener('resize', onResize); } catch { }
+    try { (process.stdin as any).removeListener('keypress', onKeypress); } catch { }
+    try { rl.close(); } catch { }
 
-    try { process.stdout.write('\x1b[?25h'); } catch {} // show cursor
-    try { leaveAltScreen(); } catch {}
+    try { process.stdout.write('\x1b[?25h'); } catch { } // show cursor
+    try { leaveAltScreen(); } catch { }
     process.exit(0);
   }
 
@@ -249,8 +256,8 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
   const safeExit = () => cleanupAndExit();
   process.on('SIGINT', safeExit);
   process.on('SIGTERM', safeExit);
-  process.on('uncaughtException', (e) => { try { console.error(e?.message || e); } catch {} finally { safeExit(); } });
-  process.on('exit', () => { try { leaveAltScreen(); } catch {} });
+  process.on('uncaughtException', (e) => { try { console.error(e?.message || e); } catch { } finally { safeExit(); } });
+  process.on('exit', () => { try { leaveAltScreen(); } catch { } });
 
   enterAltScreen();
   // initial paint
