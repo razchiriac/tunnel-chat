@@ -22,6 +22,8 @@ export type PeerOpts = {
   onTickInactivity?: (totalMs: number) => void;
   // Optional stats callback for fast-path/RTT/fingerprints; emitted periodically when connected
   onStats?: (s: FastPathStats) => void;
+  // Optional reaction event callback (out-of-band display)
+  onReaction?: (emoji: string) => void;
 };
 
 const CTRL_PREFIX = '\x00';
@@ -178,6 +180,16 @@ export class TunnelPeer {
       const data = ev.data;
       if (typeof data === 'string' && data.startsWith(CTRL_PREFIX)) { this.handleControl(data.slice(1)); return; }
       this.onActivity();
+      if (typeof data === 'string') {
+        // Try to interpret as a structured payload first
+        try {
+          const obj = JSON.parse(data);
+          if (obj && typeof obj === 'object') {
+            if (obj.type === 'reaction' && typeof obj.emoji === 'string') { this.opts.onReaction?.(obj.emoji); return; }
+            if (obj.type === 'msg' && typeof obj.text === 'string') { this.opts.onMessage(obj.text); return; }
+          }
+        } catch { }
+      }
       const text = typeof data === 'string' ? data : '[binary]';
       this.opts.onMessage(text);
     };

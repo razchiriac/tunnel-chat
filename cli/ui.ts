@@ -40,6 +40,7 @@ export type UI = {
   setNetworkStats(info: { pathLabel: string; rttMs?: number; fingerprintShort?: string }): void;
   resetInactivity(totalMs: number): void;
   close(): void;
+  showReaction(emoji: string): void;
 };
 
 const BOX = { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' };
@@ -110,6 +111,8 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   let netFpShort: string = '—';
   let inactivityRemainingMs: number | null = null;
   let inactivityTimer: NodeJS.Timeout | null = null;
+  let reactionText: string | null = null;
+  let reactionTimer: NodeJS.Timeout | null = null;
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '' });
   readline.emitKeypressEvents(process.stdin, rl as any);
@@ -239,6 +242,10 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
       }
     }
 
+    // Optionally add transient reaction bubble under peer's latest
+    if (reactionText) {
+      conversationLines.push(`${C.dim}   ↳ reaction:${C.reset} ${reactionText}`);
+    }
     // Display the most recent lines that fit in the conversation pane
     const displayLines = conversationLines.slice(-innerH);
     for (let i = 0; i < innerH; i++) {
@@ -348,6 +355,12 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
       inactivityRemainingMs = totalMs;
       startInactivityTicker();
       render();
+    },
+    showReaction(emoji: string) {
+      if (reactionTimer) clearTimeout(reactionTimer);
+      reactionText = emoji;
+      render();
+      reactionTimer = setTimeout(() => { reactionText = null; render(); }, 2500);
     },
     close() { cleanupAndExit(); }
   };

@@ -115,7 +115,8 @@ Waiting for peer…`
       onStats: (s) => {
         const fpShort = s.remoteFingerprint || s.localFingerprint || undefined;
         ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: fpShort });
-      }
+      },
+      onReaction: (emoji) => ui.showReaction(emoji)
     });
 
     ui.promptInput((line) => {
@@ -138,6 +139,16 @@ Waiting for peer…`
         } else {
           ui.setStatus(`path: ${snap.pathLabel}  rtt: ${snap.rttMs ?? '—'} ms  enc: ${snap.remoteFingerprint ? 'present' : '—'}`);
         }
+        return;
+      }
+
+      if (line.startsWith('/react')) {
+        if (!proStatus.isPro) { ui.setStatus('This is a Pro feature. Upgrade: npx tunnel-chat upgrade'); return; }
+        const emoji = line.replace('/react', '').trim();
+        if (!emoji) { ui.setStatus('usage: /react :emoji:'); return; }
+        const okSend = (peer as any)?.send?.(JSON.stringify({ type: 'reaction', emoji }));
+        if (!okSend) ui.setStatus('channel not open yet…');
+        else ui.showReaction(emoji);
         return;
       }
 
