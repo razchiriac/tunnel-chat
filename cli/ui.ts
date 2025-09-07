@@ -188,11 +188,19 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     if (conversation.length === 0) {
       conversationLines.push(`${C.dim}No messages yet. Start typing to begin the conversation...${C.reset}`);
     } else {
-      // Debug: show conversation count in the title
-      const debugInfo = `${C.dim}[${conversation.length} messages]${C.reset}`;
-      conversationLines.push(debugInfo);
-      // Show recent messages that fit in the available space
-      for (const msg of conversation) {
+      // Show only the last message from each sender (peer and you)
+      const lastPeerMsg = conversation.filter(msg => msg.sender === 'peer').pop();
+      const lastYouMsg = conversation.filter(msg => msg.sender === 'you').pop();
+
+      // Collect the messages to display in chronological order
+      const messagesToShow = [];
+      if (lastPeerMsg) messagesToShow.push(lastPeerMsg);
+      if (lastYouMsg) messagesToShow.push(lastYouMsg);
+
+      // Sort by timestamp to maintain chronological order
+      messagesToShow.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+      for (const msg of messagesToShow) {
         const time = msg.timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
         const sender = msg.sender === 'you' ? `${C.fg.green}You${C.reset}` : `${C.fg.blue}Peer${C.reset}`;
         const prefix = `${C.dim}[${time}]${C.reset} ${sender}: `;
@@ -217,7 +225,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
         }
 
         // Add a small gap between different messages
-        if (msg !== conversation[conversation.length - 1]) {
+        if (msg !== messagesToShow[messagesToShow.length - 1]) {
           conversationLines.push('');
         }
       }

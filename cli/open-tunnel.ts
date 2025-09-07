@@ -105,7 +105,7 @@ Waiting for peer…`
       apiKey: proStatus.isPro ? process.env.TUNNEL_API_KEY : undefined, // Pass API key for premium TURN servers
       onOpen: () => {
         const proText = proStatus.isPro ? ' [PRO]' : '';
-        ui.setStatus(`connected on "${name}"${proText}. Messages are now displayed in conversation history.`);
+        ui.setStatus(`connected on "${name}"${proText}. Showing last message from each sender.`);
       },
       onMessage: (text) => ui.showRemote('peer', text),
       onStatus: (text) => ui.setStatus(text),
