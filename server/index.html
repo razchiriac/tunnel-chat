@@ -191,7 +191,7 @@
                 <p class="text-xl text-gray-300 max-w-3xl mx-auto">Level up with multi‑peer rooms, emoji reactions, fast-path/RTT, and encryption fingerprints — right in your terminal.</p>
             </div>
 
-            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
                 <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700">
                     <div class="text-3xl mb-3">👥</div>
                     <h3 class="text-lg font-semibold mb-2">Multi‑peer rooms</h3>
@@ -215,6 +215,13 @@
                     <h3 class="text-lg font-semibold mb-2">Encryption fingerprint</h3>
                     <p class="text-gray-300 mb-3">Show DTLS fingerprints to verify encryption keys end‑to‑end.</p>
                     <div class="bg-gray-900 rounded-lg p-3 font-mono text-xs text-blue-300">/fpkey</div>
+                </div>
+                <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700">
+                    <div class="text-3xl mb-3">🎨</div>
+                    <h3 class="text-lg font-semibold mb-2">Terminal themes</h3>
+                    <p class="text-gray-300 mb-3">Pick from default, matrix, solarized, or mono.</p>
+                    <div class="bg-gray-900 rounded-lg p-3 font-mono text-xs text-blue-300">/theme solarized</div>
+                    <div class="bg-gray-900 rounded-lg p-3 font-mono text-xs text-blue-300 mt-2">--theme matrix</div>
                 </div>
             </div>
 
@@ -285,6 +292,7 @@
                         <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Emoji reactions (<span class="font-mono text-xs">/react</span>)</li>
                         <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Fast‑path label + RTT (<span class="font-mono text-xs">/fp</span>)</li>
                         <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Encryption fingerprint (<span class="font-mono text-xs">/fpkey</span>)</li>
+                        <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Terminal themes (default/matrix/solarized/mono)</li>
                     </ul>
                     <button onclick="upgradeToPro()" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 py-3 rounded-lg font-semibold transition-all transform hover:scale-105">
                         Upgrade to Pro

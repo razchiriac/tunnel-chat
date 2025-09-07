@@ -41,6 +41,7 @@ export type UI = {
   resetInactivity(totalMs: number): void;
   close(): void;
   showReaction(emoji: string): void;
+  setTheme(name: string): void;
 };
 
 const BOX = { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' };
@@ -92,7 +93,7 @@ function iceIndicator(ice: string): { dot: string; label: string } {
   return { dot: `${C.fg.gray}●${C.reset}`, label: `${C.fg.gray}${s}${C.reset}` };
 }
 
-export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: boolean = false): UI {
+export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: boolean = false, initialTheme?: string): UI {
   // Create colored title - highlight "Pro" with gold/yellow color for premium feel
   const appTitle = isPro
     ? `Tunnel Chat ${C.fg.yellow}${C.bold}Pro${C.reset}${C.bold}${C.fg.white}`
@@ -105,6 +106,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   let disposed = false;
 
   let iceState = 'new';
+  let themeName: string = (initialTheme || process.env.TUNNEL_THEME || 'default').toLowerCase();
   // Network indicators (fast-path, RTT, encryption fingerprint short)
   let netPath: string = '—';
   let netRtt: string = '—';
@@ -146,6 +148,46 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     return cleaned.slice(0, 8) + '…';
   }
 
+  // Theme helpers (affect colors only in header/labels)
+  function getThemeColors(name: string) {
+    const t = name.toLowerCase();
+    if (t === 'matrix') {
+      return {
+        brand: C.fg.green,
+        tunnel: C.fg.green,
+        creator: C.fg.green,
+        joiner: C.fg.green,
+        accent: C.fg.green,
+      };
+    }
+    if (t === 'solarized') {
+      return {
+        brand: C.fg.yellow,
+        tunnel: C.fg.yellow,
+        creator: C.fg.green,
+        joiner: C.fg.blue,
+        accent: C.fg.yellow,
+      };
+    }
+    if (t === 'mono' || t === 'monochrome') {
+      return {
+        brand: C.fg.gray,
+        tunnel: C.fg.white,
+        creator: C.fg.gray,
+        joiner: C.fg.gray,
+        accent: C.fg.gray,
+      };
+    }
+    // default
+    return {
+      brand: C.fg.cyan,
+      tunnel: C.fg.magenta,
+      creator: C.fg.green,
+      joiner: C.fg.blue,
+      accent: C.fg.cyan,
+    };
+  }
+
   function drawBox(x: number, y: number, w: number, h: number, title?: string) {
     moveTo(x, y); process.stdout.write(BOX.tl + BOX.h.repeat(w - 2) + BOX.tr);
     if (title) {
@@ -176,9 +218,10 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
 
     // Title/status - show "Tunnel Chat Pro" for users with pro subscription
     drawBox(0, 0, totalW, titleH, `${C.bold}${C.fg.white}${appTitle}${C.reset}`);
-    const brand = `${C.bold}${C.fg.cyan}ditch.chat${C.reset}`;
-    const tunnel = `${C.dim}tunnel:${C.reset} ${C.fg.magenta}${tunnelName}${C.reset}`;
-    const roleStr = `${C.dim}role:${C.reset} ${role === 'creator' ? C.fg.green + 'creator' : C.fg.blue + 'joiner'}${C.reset}`;
+    const theme = getThemeColors(themeName);
+    const brand = `${C.bold}${theme.brand}ditch.chat${C.reset}`;
+    const tunnel = `${C.dim}tunnel:${C.reset} ${theme.tunnel}${tunnelName}${C.reset}`;
+    const roleStr = `${C.dim}role:${C.reset} ${role === 'creator' ? theme.creator + 'creator' : theme.joiner + 'joiner'}${C.reset}`;
     const countdown = `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
     moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
     moveTo(2, 2); process.stdout.write(padRight(`${C.dim}status:${C.reset} ${status}`, totalW - 4));
@@ -188,7 +231,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     // Single conversation pane with messenger-style layout
     const conversationH = contentH;
     const y0 = titleH; // keep conversation start; we already drew 3 header rows
-    drawBox(conversationX, y0, conversationW, conversationH, `${C.bold}${C.fg.cyan}Conversation${C.reset}`);
+    drawBox(conversationX, y0, conversationW, conversationH, `${C.bold}${getThemeColors(themeName).brand}Conversation${C.reset}`);
 
     const innerW = conversationW - 2;
     const innerH = conversationH - 2;
@@ -361,6 +404,10 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
       reactionText = emoji;
       render();
       reactionTimer = setTimeout(() => { reactionText = null; render(); }, 2500);
+    },
+    setTheme(name: string) {
+      themeName = name.toLowerCase();
+      render();
     },
     close() { cleanupAndExit(); }
   };

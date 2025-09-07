@@ -76,7 +76,8 @@ program
     DEFAULT_SIGNAL
   )
   .option('--peers <n>', 'enable Pro multi-peer hub with max peers', (v: string) => Number(v), 0)
-  .action(async (nameArg: string | undefined, opts: { signal: string; peers?: number }) => {
+  .option('--theme <name>', 'set theme: default|matrix|solarized|mono')
+  .action(async (nameArg: string | undefined, opts: { signal: string; peers?: number; theme?: string }) => {
     const name = nameArg || autoName();
     const role: 'creator' | 'joiner' = nameArg ? 'joiner' : 'creator';
 
@@ -84,7 +85,7 @@ program
     const proStatus = await checkProStatus(opts.signal);
 
     // ✅ One UI instance only - now with Pro status
-    const ui = createUI(name, role, proStatus.isPro);
+    const ui = createUI(name, role, proStatus.isPro, opts.theme);
 
     if (role === 'creator') {
       const proText = proStatus.isPro ? ' [PRO]' : '';
@@ -166,6 +167,14 @@ Waiting for peer…`
 
     ui.promptInput((line) => {
       if (!line) return;
+      if (line.startsWith('/theme')) {
+        const t = line.replace('/theme', '').trim().toLowerCase();
+        if (!proStatus.isPro) { ui.setStatus('This is a Pro feature. Upgrade: npx tunnel-chat upgrade'); return; }
+        if (!t) { ui.setStatus('usage: /theme <default|matrix|solarized|mono>'); return; }
+        ui.setTheme(t);
+        ui.setStatus(`theme set to ${t}`);
+        return;
+      }
       if (line.trim() === 'r' && role === 'joiner') {
         peer['ws'].send(JSON.stringify({ type: 'join', name }));
         const proText = proStatus.isPro ? ' [PRO]' : '';
