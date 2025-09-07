@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+import { exec as execCb } from 'child_process';
 import { Command } from 'commander';
+import fs from 'fs';
+import path from 'path';
+import { promisify } from 'util';
 import { autoName } from './name.js';
 import { TunnelPeer } from './peer.js';
 import { createUI } from './ui.js';
+const exec = promisify(execCb);
 
 const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 const DEFAULT_BILLING_SERVER = process.env.BILLING_SERVER ?? 'https://ditch.chat';
@@ -153,7 +158,18 @@ Waiting for peer…`
         const proText = proStatus.isPro ? ' [PRO]' : '';
         ui.setStatus(`connected on "${name}"${proText}. Showing last message from each sender.`);
       },
-      onMessage: (text) => ui.showRemote('peer', text),
+      onMessage: (text) => {
+        // Render file payloads nicely if received as JSON
+        try {
+          const obj = JSON.parse(text);
+          if (obj && obj.type === 'file' && typeof obj.name === 'string' && typeof obj.url === 'string') {
+            const sizeStr = typeof obj.size === 'number' ? ` · ${(obj.size / (1024 * 1024)).toFixed(1)}MB` : '';
+            ui.showRemote('peer', `📎 ${obj.name}${sizeStr} → ${obj.url}`);
+            return;
+          }
+        } catch { }
+        ui.showRemote('peer', text);
+      },
       onStatus: (text) => ui.setStatus(text),
       onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
       onIce: (state) => ui.setIceState(state),
@@ -165,7 +181,85 @@ Waiting for peer…`
       onReaction: (emoji) => ui.showReaction(emoji)
     });
 
-    ui.promptInput((line) => {
+    // --- File picker and upload helpers ---
+    function parseDroppedPath(input: string): string | null {
+      let s = (input || '').trim();
+      if (!s) return null;
+      // Handle macOS/Unix paths with spaces or file:// URLs
+      if (s.startsWith('file://')) {
+        try { s = decodeURI(s.replace('file://', '')); } catch { }
+      }
+      if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) s = s.slice(1, -1);
+      s = s.replace(/\\ /g, ' ');
+      try { if (fs.existsSync(s) && fs.statSync(s).isFile()) return s; } catch { }
+      return null;
+    }
+
+    async function pickFilePath(): Promise<string | null> {
+      try {
+        if (process.platform === 'darwin') {
+          const script = "POSIX path of (choose file with prompt \"Select a file to upload\")";
+          const { stdout } = await exec(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+          const p = stdout.trim();
+          if (p && fs.existsSync(p) && fs.statSync(p).isFile()) return p;
+        } else if (process.platform === 'linux') {
+          const { stdout: which } = await exec('command -v zenity || true');
+          if (which.trim()) {
+            const { stdout } = await exec('zenity --file-selection');
+            const p = stdout.trim();
+            if (p && fs.existsSync(p) && fs.statSync(p).isFile()) return p;
+          }
+        }
+      } catch { }
+      return null;
+    }
+
+    async function uploadAndSend(filePath: string) {
+      if (!proStatus.isPro) { ui.setStatus('This is a Pro feature. Upgrade: npx tunnel-chat upgrade'); return; }
+      try {
+        const st = fs.statSync(filePath);
+        const maxBytes = Number(process.env.MAX_UPLOAD_BYTES || 10 * 1024 * 1024);
+        if (st.size > maxBytes) { ui.setStatus(`Upload too large (max ${(maxBytes / 1024 / 1024).toFixed(1)} MB)`); return; }
+        const filename = path.basename(filePath);
+        const mime = filename.toLowerCase().endsWith('.png') ? 'image/png'
+          : (filename.toLowerCase().endsWith('.jpg') || filename.toLowerCase().endsWith('.jpeg')) ? 'image/jpeg'
+            : filename.toLowerCase().endsWith('.gif') ? 'image/gif'
+              : 'application/octet-stream';
+
+        const server = process.env.BILLING_SERVER ?? 'https://ditch.chat';
+        const key = process.env.TUNNEL_API_KEY || '';
+        const res = await fetch(`${server}/auth/upload`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'authorization': `Bearer ${key}` },
+          body: JSON.stringify({ filename, size: st.size, mime })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          ui.setStatus(`upload auth failed: ${err.error || res.status}`);
+          return;
+        }
+        const info = await res.json() as any;
+        if (!info?.putUrl || !info?.getUrl) { ui.setStatus('upload server misconfigured'); return; }
+
+        ui.setStatus(`uploading ${filename}…`);
+        const stream = fs.createReadStream(filePath);
+        const putRes = await fetch(info.putUrl, { method: 'PUT', headers: { 'content-type': mime }, body: stream as any });
+        if (!putRes.ok) { ui.setStatus(`upload failed: ${putRes.status}`); return; }
+
+        const payload = { type: 'file', name: filename, size: st.size, url: info.getUrl };
+        const sent = peer.send(JSON.stringify(payload));
+        if (sent) {
+          ui.showLocal('you', `📎 ${filename} · ${(st.size / 1024 / 1024).toFixed(1)}MB → ${info.getUrl}`);
+          ui.setStatus('file sent');
+        } else {
+          ui.setStatus('channel not open yet…');
+        }
+      } catch (e: any) {
+        ui.setStatus(`upload error: ${e?.message || e}`);
+      }
+    }
+
+    async function handleInput(line: string) {
       if (!line) return;
       if (line.startsWith('/theme')) {
         const t = line.replace('/theme', '').trim().toLowerCase();
@@ -176,12 +270,11 @@ Waiting for peer…`
         return;
       }
       if (line.trim() === 'r' && role === 'joiner') {
-        peer['ws'].send(JSON.stringify({ type: 'join', name }));
+        (peer as any)['ws'].send(JSON.stringify({ type: 'join', name }));
         const proText = proStatus.isPro ? ' [PRO]' : '';
         ui.setStatus(`retrying to join "${name}"${proText} …`);
         return;
       }
-      // Slash commands (local only)
       if (line.startsWith('/fp')) {
         const snap = (peer as any).getStatsSnapshot?.();
         if (!snap) { ui.setStatus('no stats yet'); return; }
@@ -195,7 +288,6 @@ Waiting for peer…`
         }
         return;
       }
-
       if (line.startsWith('/react')) {
         if (!proStatus.isPro) { ui.setStatus('This is a Pro feature. Upgrade: npx tunnel-chat upgrade'); return; }
         const emoji = line.replace('/react', '').trim();
@@ -205,11 +297,30 @@ Waiting for peer…`
         else ui.showReaction(emoji);
         return;
       }
-
+      if (line.startsWith('/send ')) {
+        const raw = line.slice(6).trim();
+        const p = parseDroppedPath(raw) || raw;
+        if (!p || !fs.existsSync(p) || !fs.statSync(p).isFile()) { ui.setStatus('usage: /send <path-to-file>'); return; }
+        await uploadAndSend(p);
+        return;
+      }
+      if (line.trim() === '/upload') {
+        const picked = await pickFilePath();
+        if (!picked) { ui.setStatus('No picker available. Type: /send <path>'); return; }
+        await uploadAndSend(picked);
+        return;
+      }
+      const dropped = parseDroppedPath(line);
+      if (dropped) {
+        await uploadAndSend(dropped);
+        return;
+      }
       const ok = peer.send(line);
       if (!ok) ui.setStatus('channel not open yet…');
       else ui.showLocal('you', line);
-    });
+    }
+
+    ui.promptInput((line) => { void handleInput(line); });
   });
 
 // Add upgrade command
