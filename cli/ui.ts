@@ -315,12 +315,16 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
 
   return {
     promptInput(onLine) { onLineCallback = onLine; },
-    // Add messages to the conversation history instead of replacing
+    // Only keep the last message from each sender to match desired UX
     showLocal(_name, text) {
+      // Remove any previous local message, then add the latest
+      conversation = conversation.filter(m => m.sender !== 'you');
       conversation.push({ sender: 'you', message: text, timestamp: new Date() });
       render();
     },
     showRemote(_name, text) {
+      // Remove any previous peer message, then add the latest
+      conversation = conversation.filter(m => m.sender !== 'peer');
       conversation.push({ sender: 'peer', message: text, timestamp: new Date() });
       render();
     },
