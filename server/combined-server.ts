@@ -283,6 +283,22 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Home page
+    if (req.method === 'GET' && req.url === '/') {
+        try {
+            const homePagePath = path.join(process.cwd(), 'server', 'index.html');
+            const homePage = fs.readFileSync(homePagePath, 'utf-8');
+            res.setHeader('content-type', 'text/html');
+            res.setHeader('cache-control', 'public, max-age=3600'); // Cache for 1 hour
+            res.statusCode = 200;
+            return res.end(homePage);
+        } catch (e) {
+            console.error('[server] failed to serve home page:', (e as Error).message);
+            res.statusCode = 500;
+            return res.end('Home page not found');
+        }
+    }
+
     // Success page for Stripe checkout completion
     if (req.method === 'GET' && req.url === '/success') {
         try {
@@ -436,5 +452,5 @@ server.listen(PORT, () => {
     console.log(`[signaling] TTL=${TTL_MS / 1000}s JOIN_WAIT=${JOIN_WAIT_MS / 1000}s TURN_REALM=${TURN_REALM}`);
     console.log(`[billing] STRIPE_WEBHOOK_SECRET set? ${WEBHOOK_SECRET ? 'yes' : 'NO'}`);
     console.log(`[billing] KEYS_PATH ${path.resolve(KEYS_PATH)}`);
-    console.log(`[combined] endpoints: WebSocket signaling, POST /create-checkout-session, POST /webhook, GET /auth/key, GET /auth/turn, GET /keys (debug)`);
+    console.log(`[combined] endpoints: GET /, GET /success, GET /cancel, POST /create-checkout-session, POST /webhook, GET /auth/key, GET /auth/turn, GET /keys (debug), WebSocket signaling`);
 });

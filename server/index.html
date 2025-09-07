@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat - Ephemeral P2P Chat from Terminal</title>
+    <meta name="description" content="Secure, ephemeral peer-to-peer chat directly from your terminal. No servers, no logs, just pure P2P communication.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a'
+                        },
+                        accent: {
+                            400: '#fbbf24',
+                            500: '#f59e0b',
+                            600: '#d97706'
+                        }
+                    },
+                    animation: {
+                        'float': 'float 6s ease-in-out infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-20px)' }
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' },
+                            '100%': { boxShadow: '0 0 30px rgba(59, 130, 246, 0.8)' }
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(30px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' }
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .terminal-window {
+            background: linear-gradient(145deg, #1f2937, #111827);
+            border: 1px solid #374151;
+        }
+        .terminal-header {
+            background: linear-gradient(90deg, #374151, #4b5563);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Navigation -->
+    <nav class="fixed top-0 w-full bg-gray-900/80 backdrop-blur-md border-b border-gray-800 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-2">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <div class="flex items-center space-x-6">
+                    <a href="#features" class="text-gray-300 hover:text-white transition-colors">Features</a>
+                    <a href="#pricing" class="text-gray-300 hover:text-white transition-colors">Pricing</a>
+                    <button onclick="showInstallModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition-colors">
+                        Get Started
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="pt-24 pb-16 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-7xl mx-auto">
+            <div class="text-center animate-fade-in">
+                <h1 class="text-5xl md:text-7xl font-bold mb-6">
+                    <span class="gradient-text">Ephemeral P2P Chat</span>
+                    <br>
+                    <span class="text-white">from your Terminal</span>
+                </h1>
+                <p class="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
+                    Secure, serverless peer-to-peer communication. No logs, no traces, just pure terminal-to-terminal connection.
+                </p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <button onclick="showInstallModal()" class="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-xl font-semibold text-lg transition-all transform hover:scale-105 animate-glow">
+                        Start Chatting Now
+                    </button>
+                    <button onclick="scrollToDemo()" class="border border-gray-600 hover:border-gray-500 px-8 py-4 rounded-xl font-semibold text-lg transition-colors">
+                        See Demo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Terminal Demo -->
+    <section id="demo" class="py-16 px-4 sm:px-6 lg:px-8 bg-gray-800/50">
+        <div class="max-w-4xl mx-auto">
+            <div class="terminal-window rounded-xl overflow-hidden animate-slide-up">
+                <div class="terminal-header px-4 py-3 flex items-center space-x-2">
+                    <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                    <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <span class="text-gray-400 text-sm ml-4">Terminal</span>
+                </div>
+                <div class="p-6 font-mono text-sm">
+                    <div class="text-green-400">$ npx tunnel-chat@latest</div>
+                    <div class="text-gray-300 mt-2">🚀 Starting tunnel chat...</div>
+                    <div class="text-blue-400 mt-1">tunnel: cosmic-butterfly-42 (creator) [PRO]</div>
+                    <div class="text-gray-300">share: npx tunnel-chat@latest cosmic-butterfly-42</div>
+                    <div class="text-gray-400">using signaling: wss://ditch.chat</div>
+                    <div class="text-yellow-400 mt-2">✅ connected on "cosmic-butterfly-42" [PRO]. Only last message is displayed.</div>
+                    <div class="mt-4">
+                        <div class="text-gray-500">peer: Hey! This is so cool 🚀</div>
+                        <div class="text-white mt-1">you: <span class="animate-pulse">|</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-20 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-7xl mx-auto">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">Why Tunnel Chat?</h2>
+                <p class="text-xl text-gray-300 max-w-2xl mx-auto">Built for developers who value privacy, simplicity, and direct communication.</p>
+            </div>
+            
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="bg-gray-800/50 p-8 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors animate-float">
+                    <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-3">Zero Logs</h3>
+                    <p class="text-gray-300">No messages stored anywhere. Pure peer-to-peer connection with ephemeral communication.</p>
+                </div>
+
+                <div class="bg-gray-800/50 p-8 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors animate-float" style="animation-delay: 0.2s">
+                    <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-3">Lightning Fast</h3>
+                    <p class="text-gray-300">Direct terminal-to-terminal connection. No web browsers, no heavy clients, just pure speed.</p>
+                </div>
+
+                <div class="bg-gray-800/50 p-8 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors animate-float" style="animation-delay: 0.4s">
+                    <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-3">Developer First</h3>
+                    <p class="text-gray-300">Built by developers, for developers. Perfect for quick collaboration and secure communication.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="py-20 px-4 sm:px-6 lg:px-8 bg-gray-800/30">
+        <div class="max-w-4xl mx-auto">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">Simple Pricing</h2>
+                <p class="text-xl text-gray-300">Start free, upgrade when you need premium features.</p>
+            </div>
+            
+            <div class="grid md:grid-cols-2 gap-8">
+                <!-- Free Tier -->
+                <div class="bg-gray-800/50 p-8 rounded-xl border border-gray-700">
+                    <h3 class="text-2xl font-bold mb-2">Free</h3>
+                    <div class="text-4xl font-bold mb-6">$0<span class="text-lg text-gray-400">/month</span></div>
+                    <ul class="space-y-3 mb-8">
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Unlimited P2P connections
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Basic STUN servers
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Open source
+                        </li>
+                    </ul>
+                    <button onclick="showInstallModal()" class="w-full border border-gray-600 hover:border-gray-500 py-3 rounded-lg font-semibold transition-colors">
+                        Get Started Free
+                    </button>
+                </div>
+
+                <!-- Pro Tier -->
+                <div class="bg-gradient-to-br from-blue-600/20 to-purple-600/20 p-8 rounded-xl border border-blue-500/50 relative">
+                    <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                        <span class="bg-gradient-to-r from-blue-500 to-purple-600 px-4 py-1 rounded-full text-sm font-semibold">Most Popular</span>
+                    </div>
+                    <h3 class="text-2xl font-bold mb-2 gradient-text">Pro</h3>
+                    <div class="text-4xl font-bold mb-6">$5<span class="text-lg text-gray-400">/month</span></div>
+                    <ul class="space-y-3 mb-8">
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Everything in Free
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Premium TURN servers
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Better connectivity
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Priority support
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-accent-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            <span class="gradient-text font-semibold">Pro badge in terminal</span>
+                        </li>
+                    </ul>
+                    <button onclick="upgradeToPro()" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 py-3 rounded-lg font-semibold transition-all transform hover:scale-105">
+                        Upgrade to Pro
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-4 sm:px-6 lg:px-8 border-t border-gray-800">
+        <div class="max-w-7xl mx-auto text-center">
+            <div class="flex items-center justify-center space-x-2 mb-4">
+                <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white font-bold text-sm">TC</span>
+                </div>
+                <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+            </div>
+            <p class="text-gray-400 mb-4">Ephemeral P2P chat from your terminal</p>
+            <p class="text-gray-500 text-sm">Built with ❤️ for developers who value privacy</p>
+        </div>
+    </footer>
+
+    <!-- Install Modal -->
+    <div id="installModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-xl p-8 max-w-md w-full border border-gray-700">
+            <div class="text-center mb-6">
+                <h3 class="text-2xl font-bold mb-2">Get Started</h3>
+                <p class="text-gray-300">Run this command in your terminal:</p>
+            </div>
+            
+            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm mb-6 relative">
+                <code class="text-green-400">npx tunnel-chat@latest</code>
+                <button onclick="copyInstallCommand()" class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                    Copy
+                </button>
+            </div>
+            
+            <div class="text-center">
+                <button onclick="closeInstallModal()" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold transition-colors">
+                    Got it!
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showInstallModal() {
+            document.getElementById('installModal').classList.remove('hidden');
+            document.getElementById('installModal').classList.add('flex');
+        }
+
+        function closeInstallModal() {
+            document.getElementById('installModal').classList.add('hidden');
+            document.getElementById('installModal').classList.remove('flex');
+        }
+
+        function copyInstallCommand() {
+            navigator.clipboard.writeText('npx tunnel-chat@latest').then(() => {
+                const button = event.target;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+
+        function scrollToDemo() {
+            document.getElementById('demo').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function upgradeToPro() {
+            // Show modal with upgrade instructions
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="bg-gray-800 rounded-xl p-8 max-w-md w-full border border-gray-700">
+                    <div class="text-center mb-6">
+                        <h3 class="text-2xl font-bold mb-2 gradient-text">Upgrade to Pro</h3>
+                        <p class="text-gray-300">Run this command in your terminal:</p>
+                    </div>
+                    
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm mb-6 relative">
+                        <code class="text-blue-400">npx tunnel-chat@latest upgrade</code>
+                        <button onclick="copyUpgradeCommand()" class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                    
+                    <div class="text-center">
+                        <button onclick="closeUpgradeModal()" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold transition-colors">
+                            Got it!
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            window.copyUpgradeCommand = () => {
+                navigator.clipboard.writeText('npx tunnel-chat@latest upgrade').then(() => {
+                    const button = modal.querySelector('button[onclick="copyUpgradeCommand()"]');
+                    button.textContent = 'Copied!';
+                    setTimeout(() => {
+                        button.textContent = 'Copy';
+                    }, 2000);
+                });
+            };
+            
+            window.closeUpgradeModal = () => {
+                document.body.removeChild(modal);
+            };
+            
+            // Close on escape or backdrop click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeUpgradeModal();
+            });
+            document.addEventListener('keydown', function escHandler(e) {
+                if (e.key === 'Escape') {
+                    closeUpgradeModal();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            });
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeInstallModal();
+            }
+        });
+
+        // Close modal on backdrop click
+        document.getElementById('installModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                closeInstallModal();
+            }
+        });
+    </script>
+</body>
+</html>
