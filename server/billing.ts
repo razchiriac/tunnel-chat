@@ -10,7 +10,7 @@ const PRICE_ID = process.env.STRIPE_PRICE_ID || ''; // price_xxx
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const KEYS_PATH = process.env.KEYS_PATH ?? path.join(process.cwd(), 'server', 'keys.json');
 
-const stripe = new Stripe(STRIPE_SECRET, { apiVersion: '2024-06-20' });
+const stripe = new Stripe(STRIPE_SECRET, {});
 
 // ---------- keys.json helpers ----------
 function ensureKeysFile() {
