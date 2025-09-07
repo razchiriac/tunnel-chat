@@ -214,10 +214,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Debug helper: fetch keys (optional; disable in prod)
-  if (req.method === 'GET' && req.url === '/keys') {
-    return json(res, 200, { path: KEYS_PATH, keys: loadKeys() });
-  }
+  // Debug helper: fetch keys (REMOVED for security - was exposing all API keys publicly!)
 
   res.statusCode = 404; res.end('not found');
 });
@@ -226,5 +223,5 @@ server.listen(PORT, () => {
   console.log(`[billing] listening on 0.0.0.0:${PORT}`);
   console.log(`[billing] STRIPE_WEBHOOK_SECRET set? ${WEBHOOK_SECRET ? 'yes' : 'NO'}`);
   console.log(`[billing] KEYS_PATH ${path.resolve(KEYS_PATH)}`);
-  console.log(`[billing] endpoints: POST /create-checkout-session, POST /webhook, GET /auth/key, GET /keys (debug)`);
+  console.log(`[billing] endpoints: POST /create-checkout-session, POST /webhook, GET /auth/key`);
 });

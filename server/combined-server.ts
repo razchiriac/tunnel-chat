@@ -344,10 +344,7 @@ const server = http.createServer(async (req, res) => {
         `);
     }
 
-    // Debug helper: fetch keys (optional; disable in prod)
-    if (req.method === 'GET' && req.url === '/keys') {
-        return json(res, 200, { path: KEYS_PATH, keys: loadKeys() });
-    }
+    // Debug helper: fetch keys (REMOVED for security - was exposing all API keys publicly!)
 
     // Default 404 for unknown routes
     res.statusCode = 404;
@@ -452,5 +449,5 @@ server.listen(PORT, () => {
     console.log(`[signaling] TTL=${TTL_MS / 1000}s JOIN_WAIT=${JOIN_WAIT_MS / 1000}s TURN_REALM=${TURN_REALM}`);
     console.log(`[billing] STRIPE_WEBHOOK_SECRET set? ${WEBHOOK_SECRET ? 'yes' : 'NO'}`);
     console.log(`[billing] KEYS_PATH ${path.resolve(KEYS_PATH)}`);
-    console.log(`[combined] endpoints: GET /, GET /success, GET /cancel, POST /create-checkout-session, POST /webhook, GET /auth/key, GET /auth/turn, GET /keys (debug), WebSocket signaling`);
+    console.log(`[combined] endpoints: GET /, GET /success, GET /cancel, POST /create-checkout-session, POST /webhook, GET /auth/key, GET /auth/turn, WebSocket signaling`);
 });
