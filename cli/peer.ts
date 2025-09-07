@@ -4,7 +4,6 @@ import WebSocket from 'ws';
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
-import crypto from 'crypto';
 
 const { RTCPeerConnection, RTCDataChannel } = (wrtc as any);
 
@@ -13,7 +12,7 @@ type Role = 'creator' | 'joiner';
 export type PeerOpts = {
   name: string;
   role: Role;
-  signalingURL: string; // e.g., wss://ditch.chat
+  signalingURL: string;
   onOpen: () => void;
   onMessage: (text: string) => void;
   onStatus: (text: string) => void;
@@ -22,40 +21,33 @@ export type PeerOpts = {
   onTickInactivity?: (totalMs: number) => void;
 };
 
-const CTRL_PREFIX = '\x00'; // hidden control frames
+const CTRL_PREFIX = '\x00';
 
-// ====== Config (env) ======
-const AUTH_URL   = process.env.DITCH_AUTH_URL ?? 'https://ditch.chat/auth/turn';
-const TURN_HOST  = process.env.TURN_HOST      ?? 'ditch.chat';
-const HAS_KEY    = !!process.env.TUNNEL_KEY;
+const AUTH_URL  = process.env.DITCH_AUTH_URL ?? 'https://ditch.chat/auth/turn';
+const TURN_HOST = process.env.TURN_HOST      ?? 'ditch.chat';
+const HAS_KEY   = !!process.env.TUNNEL_KEY;
 
-// Inactivity (2 minutes as requested)
-const INACTIVITY_MS = Number(process.env.INACTIVITY_MS || 2 * 60 * 1000);
-
-// Join retry knobs
+// timeouts
+const INACTIVITY_MS       = Number(process.env.INACTIVITY_MS || 2 * 60 * 1000);
+const WATCH_CONNECT_MS    = Number(process.env.WATCH_CONNECT_MS || 12_000);
 const JOIN_RETRY_TOTAL_MS = Number(process.env.JOIN_RETRY_TOTAL_MS || 15_000);
 const JOIN_RETRY_BASE_MS  = Number(process.env.JOIN_RETRY_BASE_MS  || 600);
 
-// Connect watchdog for joiner
-const WATCH_CONNECT_MS     = Number(process.env.WATCH_CONNECT_MS     || 12_000);
+// NEW: watchdog for TURN candidate gathering (avoid instant fail)
+const TURN_GATHER_MS      = Number(process.env.TURN_GATHER_MS || 3000);
 
-// Keepalive (does NOT reset inactivity)
-const KEEPALIVE_MS         = Number(process.env.KEEPALIVE_MS         || 10_000);
-const KEEPALIVE_TIMEOUT_MS = Number(process.env.KEEPALIVE_TIMEOUT_MS || 5_000);
-const KEEPALIVE_MISS_MAX   = Number(process.env.KEEPALIVE_MISS_MAX   || 3);
-
-// ====== Helper: tiny fetch without deps ======
+// tiny fetch
 function fetchJSON(u: string): Promise<any> {
   return new Promise((res, rej) => {
     const url = new URL(u);
     const mod = url.protocol === 'https:' ? https : http;
     const req = mod.request(
-      { method: 'GET', hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, headers: { 'accept': 'application/json' } },
-      (r) => {
+      { method: 'GET', hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, headers: { accept: 'application/json' } },
+      r => {
         let data = '';
-        r.on('data', (c) => (data += c));
+        r.on('data', c => (data += c));
         r.on('end', () => {
-          try { res(JSON.parse(data)); } catch (e) { rej(e); }
+          try { res(JSON.parse(data)); } catch (e) { rej(new Error(`Non-JSON auth response: ${data.slice(0,120)}`)); }
         });
       }
     );
@@ -77,81 +69,41 @@ export class TunnelPeer {
   private isConnected = false;
   private hasRemoteOffer = false;
 
-  // join loop
   private joinActive = false;
   private joinStart = 0;
   private joinAttempt = 0;
   private joinTimer?: NodeJS.Timeout;
 
-  // connection watchdog (joiner)
   private connectWatch?: NodeJS.Timeout;
   private iceRestarted = false;
-  private didFullRestart = false;
 
-  // keepalive
+  // NEW: TURN state
+  private turnEnabled = false;
+  private sawRelayCandidate = false;
+  private turnGatherTimer?: NodeJS.Timeout;
+
+  // keepalive (doesn’t bump inactivity)
   private kaTimer?: NodeJS.Timeout;
   private kaTimeout?: NodeJS.Timeout;
   private kaMisses = 0;
+  private readonly KEEPALIVE_MS = Number(process.env.KEEPALIVE_MS || 10000);
+  private readonly KEEPALIVE_TIMEOUT_MS = Number(process.env.KEEPALIVE_TIMEOUT_MS || 5000);
+  private readonly KEEPALIVE_MISS_MAX = Number(process.env.KEEPALIVE_MISS_MAX || 3);
 
   constructor(opts: PeerOpts) {
     this.opts = opts;
-    this.pc = new RTCPeerConnection(this.makeRtcConfig());
+    // IMPORTANT: start in STUN mode to avoid instant failures
+    this.pc = new RTCPeerConnection({
+      iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+      iceTransportPolicy: 'all',
+      iceCandidatePoolSize: 8,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+    });
     this.attachPeerHandlers();
     this.connectWS();
   }
 
-  // Build RTC config. If paid, force TURN relay for instant connects.
-  private makeRtcConfig(): RTCConfiguration {
-    if (HAS_KEY) {
-      // Will be replaced with real creds after we fetch them (see maybeUpgradeToTurn()).
-      return {
-        iceServers: [{ urls: [`turn:${TURN_HOST}:3478?transport=udp`] }],
-        iceTransportPolicy: 'relay',
-        iceCandidatePoolSize: 8,
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require',
-      };
-    } else {
-      return {
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-        iceTransportPolicy: 'all',
-        iceCandidatePoolSize: 8,
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require',
-      };
-    }
-  }
-
-  private async maybeUpgradeToTurn() {
-    if (!HAS_KEY) return;
-    try {
-      const url = new URL(AUTH_URL);
-      url.searchParams.set('key', process.env.TUNNEL_KEY!);
-      const j = await fetchJSON(url.toString());
-      if (!j?.username || !j?.credential || !j?.ttlSeconds) {
-        this.opts.onStatus('failed to fetch TURN creds');
-        return;
-      }
-      const turnServers: RTCIceServer[] = [
-        { urls: [`turn:${TURN_HOST}:3478?transport=udp`], username: j.username, credential: j.credential },
-        { urls: [`turn:${TURN_HOST}:3478?transport=tcp`], username: j.username, credential: j.credential },
-        { urls: [`turns:${TURN_HOST}:5349?transport=tcp`], username: j.username, credential: j.credential },
-      ];
-      // Update configuration on the fly
-      (this.pc as any).setConfiguration?.({
-        iceServers: turnServers,
-        iceTransportPolicy: 'relay',
-        iceCandidatePoolSize: 8,
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require',
-      });
-      this.opts.onStatus(`TURN enabled (expires in ~${Math.floor(j.ttlSeconds/60)}m)`);
-    } catch (e) {
-      this.opts.onStatus(`TURN auth error: ${(e as Error).message || e}`);
-    }
-  }
-
-  // ===== Peer wiring =====
   private attachPeerHandlers() {
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
@@ -163,7 +115,7 @@ export class TunnelPeer {
         this.stopJoinLoop();
         this.clearWatch();
         this.startKeepalive();
-        this.onActivity(); // start inactivity countdown on connect
+        this.onActivity();
         this.opts.onOpen();
       }
     };
@@ -175,9 +127,13 @@ export class TunnelPeer {
       if (s === 'connected' || s === 'completed') this.onActivity();
     };
 
-    // IMPORTANT: trickle candidates to speed up locking to TURN
+    // Trickle ICE + detect relay candidates
     this.pc.onicecandidate = (ev: RTCPeerConnectionIceEvent) => {
       if (ev.candidate) {
+        // detect relay
+        if (typeof ev.candidate.candidate === 'string' && ev.candidate.candidate.includes(' typ relay ')) {
+          this.sawRelayCandidate = true;
+        }
         this.safeSend({
           type: 'candidate',
           name: this.opts.name,
@@ -188,12 +144,8 @@ export class TunnelPeer {
       }
     };
 
-    this.pc.onicegatheringstatechange = () => {
-      this.opts.onStatus(`ICE gathering: ${this.pc.iceGatheringState}`);
-    };
-
     if (this.opts.role === 'creator') {
-      this.dc = this.pc.createDataChannel('tunnel', { negotiated: false });
+      this.dc = this.pc.createDataChannel('tunnel');
       this.wireChannel(this.dc);
     } else {
       this.pc.ondatachannel = (ev: RTCDataChannelEvent) => {
@@ -207,34 +159,26 @@ export class TunnelPeer {
     dc.onopen = () => this.opts.onStatus('data channel open');
     dc.onmessage = (ev: MessageEvent) => {
       const data = ev.data;
-
-      // Handle control BEFORE counting activity
-      if (typeof data === 'string' && data.startsWith(CTRL_PREFIX)) {
-        this.handleControl(data.slice(1));
-        return; // no inactivity reset for control frames
-      }
-
-      this.onActivity(); // real user traffic only
+      if (typeof data === 'string' && data.startsWith(CTRL_PREFIX)) { this.handleControl(data.slice(1)); return; }
+      this.onActivity();
       const text = typeof data === 'string' ? data : '[binary]';
       this.opts.onMessage(text);
     };
-    dc.onclose = () => this.close();
+    dc.onclose = () => this.close();      // keep your existing behavior
     dc.onerror = () => this.opts.onStatus('data channel error');
   }
 
-  // ===== WS signaling =====
   private connectWS() {
     if (this.disposed) return;
     this.ws = new WebSocket(this.opts.signalingURL);
     this.ws.on('open', async () => {
       this.wsReconnects = 0;
-      await this.maybeUpgradeToTurn();
+      // Try TURN upgrade; don’t break if it fails
+      if (HAS_KEY) await this.tryEnableTurn();
       this.startSignaling();
     });
     this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
-    this.ws.on('error', (err) => {
-      this.opts.onStatus(`signaling error: ${(err as Error).message || err}`);
-    });
+    this.ws.on('error', (err) => this.opts.onStatus(`signaling error: ${(err as Error).message || err}`));
     this.ws.on('close', () => {
       if (this.disposed || this.isConnected) return;
       const delay = Math.min(2000 + this.wsReconnects * 500, 4000);
@@ -243,12 +187,55 @@ export class TunnelPeer {
     });
   }
 
-  // ===== Offer/Answer (+ trickle) =====
+  // === TURN enable (safe) ===
+  private async tryEnableTurn() {
+    try {
+      const url = new URL(AUTH_URL);
+      url.searchParams.set('key', process.env.TUNNEL_KEY!);
+      const j = await fetchJSON(url.toString());
+
+      if (!j?.username || !j?.credential) {
+        this.opts.onStatus('TURN auth failed (no creds); staying on STUN');
+        return;
+      }
+
+      (this.pc as any).setConfiguration?.({
+        iceServers: [
+          { urls: [`turn:${TURN_HOST}:3478?transport=udp`], username: j.username, credential: j.credential },
+          { urls: [`turn:${TURN_HOST}:3478?transport=tcp`], username: j.username, credential: j.credential },
+          { urls: [`turns:${TURN_HOST}:5349?transport=tcp`], username: j.username, credential: j.credential },
+          { urls: ['stun:stun.l.google.com:19302'] }, // keep as last-resort fallback
+        ],
+        // IMPORTANT: only switch to 'relay' after creds succeed
+        iceTransportPolicy: 'relay',
+      });
+      this.turnEnabled = true;
+      this.sawRelayCandidate = false;
+
+      // Start a small watchdog: if no relay candidates are gathered soon, drop back to STUN
+      this.turnGatherTimer = setTimeout(() => {
+        if (!this.isConnected && !this.sawRelayCandidate) {
+          this.opts.onStatus('TURN relay not reachable; falling back to STUN');
+          (this.pc as any).setConfiguration?.({
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+            iceTransportPolicy: 'all',
+          });
+          this.turnEnabled = false;
+        }
+      }, TURN_GATHER_MS);
+
+      this.opts.onStatus('TURN enabled');
+    } catch (e) {
+      this.opts.onStatus(`TURN auth error; staying on STUN: ${(e as Error).message || e}`);
+      // remain on STUN
+    }
+  }
+
+  // === Offer/Answer (+ trickle) ===
   private async startSignaling() {
     if (this.opts.role === 'creator') {
       const offer = await this.pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
       await this.pc.setLocalDescription(offer);
-      // Send immediately (trickle ICE)
       this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus(`waiting for a peer to join "${this.opts.name}" …`);
     } else {
@@ -260,7 +247,7 @@ export class TunnelPeer {
     if (msg.type === 'created') return;
 
     if (msg.type === 'not_found' && this.opts.role === 'joiner') {
-      if (this.hasRemoteOffer || this.isConnected) return; // stale
+      if (this.hasRemoteOffer || this.isConnected) return;
       this.opts.onStatus(`tunnel "${this.opts.name}" not found yet…`);
       return;
     }
@@ -273,7 +260,6 @@ export class TunnelPeer {
       await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
-      // Send immediately (trickle ICE)
       this.safeSend({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus('sent answer');
       return;
@@ -307,7 +293,6 @@ export class TunnelPeer {
     } catch {}
   }
 
-  // ===== Join loop (pre-offer) =====
   private startJoinLoop() {
     this.stopJoinLoop();
     this.joinActive = true;
@@ -333,13 +318,8 @@ export class TunnelPeer {
 
     this.joinTimer = setTimeout(tick, 0);
   }
+  private stopJoinLoop() { this.joinActive = false; if (this.joinTimer) { clearTimeout(this.joinTimer); this.joinTimer = undefined; } }
 
-  private stopJoinLoop() {
-    this.joinActive = false;
-    if (this.joinTimer) { clearTimeout(this.joinTimer); this.joinTimer = undefined; }
-  }
-
-  // ===== Connect watch (joiner) =====
   private startConnectWatch() {
     this.clearWatch();
     if (this.opts.role !== 'joiner') return;
@@ -349,13 +329,13 @@ export class TunnelPeer {
         this.iceRestarted = true;
         this.opts.onStatus('connection slow, attempting ICE restart…');
         await this.restartIce().catch(() => {});
-        this.startConnectWatch(); // re-arm
+        this.startConnectWatch();
       }
     }, WATCH_CONNECT_MS);
   }
   private clearWatch() { if (this.connectWatch) { clearTimeout(this.connectWatch); this.connectWatch = undefined; } }
 
-  // ===== Keepalive on DC (does not bump inactivity) =====
+  // keepalive (control frames; no inactivity bump)
   private startKeepalive() {
     this.stopKeepalive();
     if (!this.dc) return;
@@ -364,36 +344,28 @@ export class TunnelPeer {
       try { this.dc.send(CTRL_PREFIX + 'PING'); } catch {}
       this.kaTimeout = setTimeout(() => {
         this.kaMisses++;
-        if (this.kaMisses >= KEEPALIVE_MISS_MAX) {
+        if (this.kaMisses >= this.KEEPALIVE_MISS_MAX) {
           this.opts.onStatus('peer unresponsive, trying ICE restart…');
           this.restartIce().catch(() => {});
           this.kaMisses = 0;
         }
-      }, KEEPALIVE_TIMEOUT_MS);
+      }, this.KEEPALIVE_TIMEOUT_MS);
     };
-    this.kaTimer = setInterval(sendPing, KEEPALIVE_MS);
+    this.kaTimer = setInterval(sendPing, this.KEEPALIVE_MS);
   }
-  private stopKeepalive() {
-    if (this.kaTimer) { clearInterval(this.kaTimer); this.kaTimer = undefined; }
-    if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; }
-    this.kaMisses = 0;
-  }
-  private handleControl(cmd: string) {
-    if (cmd === 'PING') { try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {} }
-    else if (cmd === 'PONG') { if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; } this.kaMisses = 0; }
-  }
+  private stopKeepalive() { if (this.kaTimer) clearInterval(this.kaTimer); if (this.kaTimeout) clearTimeout(this.kaTimeout); this.kaTimer = undefined; this.kaTimeout = undefined; this.kaMisses = 0; }
+  private handleControl(cmd: string) { if (cmd === 'PING') { try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {} } else if (cmd === 'PONG') { if (this.kaTimeout) clearTimeout(this.kaTimeout); this.kaTimeout = undefined; this.kaMisses = 0; } }
 
   private async restartIce() {
     try {
-      await (this.pc as any).setConfiguration?.(this.makeRtcConfig());
+      // keep current config (TURN or STUN)
       const offer = await this.pc.createOffer({ iceRestart: true });
       await this.pc.setLocalDescription(offer);
-      // trickle path: just (re)send offer immediately if creator
       if (this.opts.role === 'creator') {
         this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
         this.opts.onStatus('reposted offer after ICE restart');
       } else {
-        this.safeSend({ type: 'join', name: this.opts.name }); // poke server
+        this.safeSend({ type: 'join', name: this.opts.name });
         this.opts.onStatus('requested fresh offer after ICE restart');
       }
     } catch (e) {
@@ -401,7 +373,6 @@ export class TunnelPeer {
     }
   }
 
-  // ===== App API =====
   send(text: string) {
     if (this.dc?.readyState === 'open') {
       this.dc.send(text);
@@ -422,6 +393,7 @@ export class TunnelPeer {
 
   close() {
     this.disposed = true;
+    if (this.turnGatherTimer) clearTimeout(this.turnGatherTimer);
     this.stopJoinLoop();
     this.stopKeepalive();
     this.clearWatch();
