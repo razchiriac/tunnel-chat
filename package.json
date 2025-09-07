@@ -11,6 +11,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx cli/open-tunnel.ts",
     "server": "tsx server/server.ts",
+    "billing": "tsx server/billing.ts",
+    "combined": "tsx server/combined-server.ts",
     "prepublishOnly": "pnpm run build"
   },
   "files": [

@@ -5,4 +5,4 @@ COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable && pnpm i --frozen-lockfile
 COPY . .
 EXPOSE 8787
-CMD ["pnpm","tsx","server/server.ts"]
+CMD ["pnpm","tsx","server/combined-server.ts"]
