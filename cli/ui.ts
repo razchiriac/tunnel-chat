@@ -90,11 +90,9 @@ function iceIndicator(ice: string): { dot: string; label: string } {
   return { dot: `${C.fg.gray}●${C.reset}`, label: `${C.fg.gray}${s}${C.reset}` };
 }
 
-export function createUI(tunnelName: string, role: 'creator' | 'joiner'): UI {
-  // Check if user has pro subscription by looking for TUNNEL_KEY environment variable
-  const hasProSubscription = !!process.env.TUNNEL_KEY;
+export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: boolean = false): UI {
   // Create colored title - highlight "Pro" with gold/yellow color for premium feel
-  const appTitle = hasProSubscription
+  const appTitle = isPro
     ? `Tunnel Chat ${C.fg.yellow}${C.bold}Pro${C.reset}${C.bold}${C.fg.white}`
     : 'Tunnel Chat';
 

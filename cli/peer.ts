@@ -1,9 +1,9 @@
 // cli/peer.ts
 import wrtc from '@roamhq/wrtc';
-import WebSocket from 'ws';
-import https from 'https';
 import http from 'http';
+import https from 'https';
 import { URL } from 'url';
+import WebSocket from 'ws';
 
 const { RTCPeerConnection, RTCDataChannel } = (wrtc as any);
 
@@ -13,6 +13,7 @@ export type PeerOpts = {
   name: string;
   role: Role;
   signalingURL: string;
+  apiKey?: string; // Optional API key for premium features
   onOpen: () => void;
   onMessage: (text: string) => void;
   onStatus: (text: string) => void;
@@ -23,18 +24,17 @@ export type PeerOpts = {
 
 const CTRL_PREFIX = '\x00';
 
-const AUTH_URL  = process.env.DITCH_AUTH_URL ?? 'https://ditch.chat/auth/turn';
-const TURN_HOST = process.env.TURN_HOST      ?? 'ditch.chat';
-const HAS_KEY   = !!process.env.TUNNEL_KEY;
+const AUTH_URL = process.env.DITCH_AUTH_URL ?? 'https://ditch.chat/auth/turn';
+const TURN_HOST = process.env.TURN_HOST ?? 'ditch.chat';
 
 // timeouts
-const INACTIVITY_MS       = Number(process.env.INACTIVITY_MS || 2 * 60 * 1000);
-const WATCH_CONNECT_MS    = Number(process.env.WATCH_CONNECT_MS || 12_000);
+const INACTIVITY_MS = Number(process.env.INACTIVITY_MS || 2 * 60 * 1000);
+const WATCH_CONNECT_MS = Number(process.env.WATCH_CONNECT_MS || 12_000);
 const JOIN_RETRY_TOTAL_MS = Number(process.env.JOIN_RETRY_TOTAL_MS || 15_000);
-const JOIN_RETRY_BASE_MS  = Number(process.env.JOIN_RETRY_BASE_MS  || 600);
+const JOIN_RETRY_BASE_MS = Number(process.env.JOIN_RETRY_BASE_MS || 600);
 
 // NEW: watchdog for TURN candidate gathering (avoid instant fail)
-const TURN_GATHER_MS      = Number(process.env.TURN_GATHER_MS || 3000);
+const TURN_GATHER_MS = Number(process.env.TURN_GATHER_MS || 3000);
 
 // tiny fetch
 function fetchJSON(u: string): Promise<any> {
@@ -47,7 +47,7 @@ function fetchJSON(u: string): Promise<any> {
         let data = '';
         r.on('data', c => (data += c));
         r.on('end', () => {
-          try { res(JSON.parse(data)); } catch (e) { rej(new Error(`Non-JSON auth response: ${data.slice(0,120)}`)); }
+          try { res(JSON.parse(data)); } catch (e) { rej(new Error(`Non-JSON auth response: ${data.slice(0, 120)}`)); }
         });
       }
     );
@@ -173,8 +173,8 @@ export class TunnelPeer {
     this.ws = new WebSocket(this.opts.signalingURL);
     this.ws.on('open', async () => {
       this.wsReconnects = 0;
-      // Try TURN upgrade; don’t break if it fails
-      if (HAS_KEY) await this.tryEnableTurn();
+      // Try TURN upgrade; don't break if it fails
+      if (this.opts.apiKey) await this.tryEnableTurn();
       this.startSignaling();
     });
     this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
@@ -189,9 +189,14 @@ export class TunnelPeer {
 
   // === TURN enable (safe) ===
   private async tryEnableTurn() {
+    // Only try TURN if we have an API key
+    if (!this.opts.apiKey) {
+      return;
+    }
+
     try {
       const url = new URL(AUTH_URL);
-      url.searchParams.set('key', process.env.TUNNEL_KEY!);
+      url.searchParams.set('key', this.opts.apiKey);
       const j = await fetchJSON(url.toString());
 
       if (!j?.username || !j?.credential) {
@@ -290,7 +295,7 @@ export class TunnelPeer {
       if (this.ws && (this.ws as any).readyState === this.ws.OPEN) {
         this.ws.send(JSON.stringify(obj));
       }
-    } catch {}
+    } catch { }
   }
 
   private startJoinLoop() {
@@ -311,7 +316,7 @@ export class TunnelPeer {
       this.safeSend({ type: 'join', name: this.opts.name });
       const delay = Math.min(JOIN_RETRY_BASE_MS * Math.pow(1.4, this.joinAttempt++), 2000);
       if (!this.hasRemoteOffer && !this.isConnected) {
-        this.opts.onStatus(`joining "${this.opts.name}" … (retry in ${Math.ceil(delay/100)/10}s)`);
+        this.opts.onStatus(`joining "${this.opts.name}" … (retry in ${Math.ceil(delay / 100) / 10}s)`);
       }
       this.joinTimer = setTimeout(tick, delay);
     };
@@ -328,7 +333,7 @@ export class TunnelPeer {
       if (!this.iceRestarted) {
         this.iceRestarted = true;
         this.opts.onStatus('connection slow, attempting ICE restart…');
-        await this.restartIce().catch(() => {});
+        await this.restartIce().catch(() => { });
         this.startConnectWatch();
       }
     }, WATCH_CONNECT_MS);
@@ -341,12 +346,12 @@ export class TunnelPeer {
     if (!this.dc) return;
     const sendPing = () => {
       if (!this.dc || this.dc.readyState !== 'open') return;
-      try { this.dc.send(CTRL_PREFIX + 'PING'); } catch {}
+      try { this.dc.send(CTRL_PREFIX + 'PING'); } catch { }
       this.kaTimeout = setTimeout(() => {
         this.kaMisses++;
         if (this.kaMisses >= this.KEEPALIVE_MISS_MAX) {
           this.opts.onStatus('peer unresponsive, trying ICE restart…');
-          this.restartIce().catch(() => {});
+          this.restartIce().catch(() => { });
           this.kaMisses = 0;
         }
       }, this.KEEPALIVE_TIMEOUT_MS);
@@ -354,7 +359,7 @@ export class TunnelPeer {
     this.kaTimer = setInterval(sendPing, this.KEEPALIVE_MS);
   }
   private stopKeepalive() { if (this.kaTimer) clearInterval(this.kaTimer); if (this.kaTimeout) clearTimeout(this.kaTimeout); this.kaTimer = undefined; this.kaTimeout = undefined; this.kaMisses = 0; }
-  private handleControl(cmd: string) { if (cmd === 'PING') { try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {} } else if (cmd === 'PONG') { if (this.kaTimeout) clearTimeout(this.kaTimeout); this.kaTimeout = undefined; this.kaMisses = 0; } }
+  private handleControl(cmd: string) { if (cmd === 'PING') { try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch { } } else if (cmd === 'PONG') { if (this.kaTimeout) clearTimeout(this.kaTimeout); this.kaTimeout = undefined; this.kaMisses = 0; } }
 
   private async restartIce() {
     try {
@@ -397,9 +402,9 @@ export class TunnelPeer {
     this.stopJoinLoop();
     this.stopKeepalive();
     this.clearWatch();
-    try { this.dc?.close(); } catch {}
-    try { this.pc.close(); } catch {}
-    try { this.ws?.close(); } catch {}
+    try { this.dc?.close(); } catch { }
+    try { this.pc.close(); } catch { }
+    try { this.ws?.close(); } catch { }
     this.opts.onClose();
   }
 }

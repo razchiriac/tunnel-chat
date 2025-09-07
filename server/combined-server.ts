@@ -283,6 +283,51 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Success page for Stripe checkout completion
+    if (req.method === 'GET' && req.url === '/success') {
+        try {
+            const successPagePath = path.join(process.cwd(), 'server', 'success.html');
+            const successPage = fs.readFileSync(successPagePath, 'utf-8');
+            res.setHeader('content-type', 'text/html');
+            res.setHeader('cache-control', 'public, max-age=3600'); // Cache for 1 hour
+            res.statusCode = 200;
+            return res.end(successPage);
+        } catch (e) {
+            console.error('[server] failed to serve success page:', (e as Error).message);
+            res.statusCode = 500;
+            return res.end('Success page not found');
+        }
+    }
+
+    // Cancel page for Stripe checkout cancellation
+    if (req.method === 'GET' && req.url === '/cancel') {
+        res.setHeader('content-type', 'text/html');
+        res.statusCode = 200;
+        return res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Payment Cancelled</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+                    .container { background: white; padding: 40px; border-radius: 12px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                    h1 { color: #e11d48; margin-bottom: 20px; }
+                    p { color: #6b7280; margin-bottom: 30px; }
+                    .btn { background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 8px; text-decoration: none; display: inline-block; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Payment Cancelled</h1>
+                    <p>No worries! You can upgrade to Tunnel Chat Pro anytime.</p>
+                    <a href="#" onclick="window.close()" class="btn">Close Window</a>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+
     // Debug helper: fetch keys (optional; disable in prod)
     if (req.method === 'GET' && req.url === '/keys') {
         return json(res, 200, { path: KEYS_PATH, keys: loadKeys() });

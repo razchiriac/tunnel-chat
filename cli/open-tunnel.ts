@@ -7,6 +7,38 @@ import { createUI } from './ui.js';
 const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 const DEFAULT_BILLING_SERVER = process.env.BILLING_SERVER ?? 'https://ditch.chat';
 
+// Helper function to validate API key and check Pro status
+async function checkProStatus(signalingURL: string): Promise<{ isPro: boolean; keyValid: boolean }> {
+  const apiKey = process.env.TUNNEL_API_KEY;
+
+  if (!apiKey) {
+    return { isPro: false, keyValid: false };
+  }
+
+  try {
+    // Use the signaling server's /auth/turn endpoint to validate the key
+    const serverURL = signalingURL.replace('wss://', 'https://').replace('ws://', 'http://');
+    const response = await fetch(`${serverURL}/auth/turn?key=${encodeURIComponent(apiKey)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      // Key is valid - user is Pro
+      return { isPro: true, keyValid: true };
+    } else {
+      // Key is invalid or expired
+      console.warn('⚠️  API key is invalid or expired. Pro features disabled.');
+      return { isPro: false, keyValid: false };
+    }
+  } catch (error) {
+    // Network error or server unavailable - assume non-Pro but don't show error
+    return { isPro: false, keyValid: false };
+  }
+}
+
 const program = new Command();
 
 program
@@ -18,29 +50,38 @@ program
     'signaling server url (defaults to env TUNNEL_SIGNAL or wss://ditch.chat)',
     DEFAULT_SIGNAL
   )
-  .action((nameArg: string | undefined, opts: { signal: string }) => {
+  .action(async (nameArg: string | undefined, opts: { signal: string }) => {
     const name = nameArg || autoName();
     const role: 'creator' | 'joiner' = nameArg ? 'joiner' : 'creator';
 
-    // ✅ One UI instance only
-    const ui = createUI(name, role);
+    // Check Pro status before creating UI
+    const proStatus = await checkProStatus(opts.signal);
+
+    // ✅ One UI instance only - now with Pro status
+    const ui = createUI(name, role, proStatus.isPro);
 
     if (role === 'creator') {
+      const proText = proStatus.isPro ? ' [PRO]' : '';
       ui.setStatus(
-        `tunnel: ${name} (creator).
+        `tunnel: ${name} (creator)${proText}.
 share: npx tunnel-chat@latest ${name}
 using signaling: ${opts.signal}
 Waiting for peer…`
       );
     } else {
-      ui.setStatus(`joining "${name}" … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
+      const proText = proStatus.isPro ? ' [PRO]' : '';
+      ui.setStatus(`joining "${name}"${proText} … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
     }
 
     const peer = new TunnelPeer({
       name,
       role,
       signalingURL: opts.signal,
-      onOpen: () => ui.setStatus(`connected on "${name}". Only last message is displayed.`),
+      apiKey: proStatus.isPro ? process.env.TUNNEL_API_KEY : undefined, // Pass API key for premium TURN servers
+      onOpen: () => {
+        const proText = proStatus.isPro ? ' [PRO]' : '';
+        ui.setStatus(`connected on "${name}"${proText}. Only last message is displayed.`);
+      },
       onMessage: (text) => ui.showRemote('peer', text),
       onStatus: (text) => ui.setStatus(text),
       onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
@@ -52,7 +93,8 @@ Waiting for peer…`
       if (!line) return;
       if (line.trim() === 'r' && role === 'joiner') {
         peer['ws'].send(JSON.stringify({ type: 'join', name }));
-        ui.setStatus(`retrying to join "${name}" …`);
+        const proText = proStatus.isPro ? ' [PRO]' : '';
+        ui.setStatus(`retrying to join "${name}"${proText} …`);
         return;
       }
       const ok = peer.send(line);
