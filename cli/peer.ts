@@ -1,6 +1,10 @@
 // cli/peer.ts
 import wrtc from '@roamhq/wrtc';
 import WebSocket from 'ws';
+import https from 'https';
+import http from 'http';
+import { URL } from 'url';
+import crypto from 'crypto';
 
 const { RTCPeerConnection, RTCDataChannel } = (wrtc as any);
 
@@ -18,32 +22,47 @@ export type PeerOpts = {
   onTickInactivity?: (totalMs: number) => void;
 };
 
-// ---- ICE / TURN config (env-driven) ----
-const TURN_URL  = process.env.TURN_URL;
-const TURN_USER = process.env.TURN_USER;
-const TURN_CRED = process.env.TURN_CRED;
+const CTRL_PREFIX = '\x00'; // hidden control frames
 
-const iceServers: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302'] }];
-if (TURN_URL && TURN_USER && TURN_CRED) {
-  iceServers.push({ urls: [TURN_URL], username: TURN_USER, credential: TURN_CRED });
-}
+// ====== Config (env) ======
+const AUTH_URL   = process.env.DITCH_AUTH_URL ?? 'https://ditch.chat/auth/turn';
+const TURN_HOST  = process.env.TURN_HOST      ?? 'ditch.chat';
+const HAS_KEY    = !!process.env.TUNNEL_KEY;
 
-const rtcConfig: RTCConfiguration = {
-  iceServers,
-  iceCandidatePoolSize: 8,
-  iceTransportPolicy: process.env.FORCE_RELAY ? 'relay' : 'all'
-};
+// Inactivity (2 minutes as requested)
+const INACTIVITY_MS = Number(process.env.INACTIVITY_MS || 2 * 60 * 1000);
 
-// ---- Joiner auto-heal/keepalive knobs (env overridable) ----
+// Join retry knobs
 const JOIN_RETRY_TOTAL_MS = Number(process.env.JOIN_RETRY_TOTAL_MS || 15_000);
 const JOIN_RETRY_BASE_MS  = Number(process.env.JOIN_RETRY_BASE_MS  || 600);
 
-const WATCH_CONNECT_MS     = Number(process.env.WATCH_CONNECT_MS     || 12_000); // after offer
+// Connect watchdog for joiner
+const WATCH_CONNECT_MS     = Number(process.env.WATCH_CONNECT_MS     || 12_000);
+
+// Keepalive (does NOT reset inactivity)
 const KEEPALIVE_MS         = Number(process.env.KEEPALIVE_MS         || 10_000);
 const KEEPALIVE_TIMEOUT_MS = Number(process.env.KEEPALIVE_TIMEOUT_MS || 5_000);
 const KEEPALIVE_MISS_MAX   = Number(process.env.KEEPALIVE_MISS_MAX   || 3);
 
-const CTRL_PREFIX = '\x00'; // control frames start with NUL (hidden from UI)
+// ====== Helper: tiny fetch without deps ======
+function fetchJSON(u: string): Promise<any> {
+  return new Promise((res, rej) => {
+    const url = new URL(u);
+    const mod = url.protocol === 'https:' ? https : http;
+    const req = mod.request(
+      { method: 'GET', hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, headers: { 'accept': 'application/json' } },
+      (r) => {
+        let data = '';
+        r.on('data', (c) => (data += c));
+        r.on('end', () => {
+          try { res(JSON.parse(data)); } catch (e) { rej(e); }
+        });
+      }
+    );
+    req.on('error', rej);
+    req.end();
+  });
+}
 
 export class TunnelPeer {
   private pc: RTCPeerConnection;
@@ -52,9 +71,6 @@ export class TunnelPeer {
   private opts: PeerOpts;
 
   private inactivityTimer?: NodeJS.Timeout;
-  private readonly INACTIVITY_MS = 2 * 60 * 1000;
-
-  // state flags
   private disposed = false;
   private wsReconnects = 0;
 
@@ -67,7 +83,7 @@ export class TunnelPeer {
   private joinAttempt = 0;
   private joinTimer?: NodeJS.Timeout;
 
-  // connection watchdogs (joiner)
+  // connection watchdog (joiner)
   private connectWatch?: NodeJS.Timeout;
   private iceRestarted = false;
   private didFullRestart = false;
@@ -79,12 +95,63 @@ export class TunnelPeer {
 
   constructor(opts: PeerOpts) {
     this.opts = opts;
-    this.pc = new RTCPeerConnection(rtcConfig as any);
+    this.pc = new RTCPeerConnection(this.makeRtcConfig());
     this.attachPeerHandlers();
     this.connectWS();
   }
 
-  // ===== Peer wiring ===================================================
+  // Build RTC config. If paid, force TURN relay for instant connects.
+  private makeRtcConfig(): RTCConfiguration {
+    if (HAS_KEY) {
+      // Will be replaced with real creds after we fetch them (see maybeUpgradeToTurn()).
+      return {
+        iceServers: [{ urls: [`turn:${TURN_HOST}:3478?transport=udp`] }],
+        iceTransportPolicy: 'relay',
+        iceCandidatePoolSize: 8,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+      };
+    } else {
+      return {
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+        iceTransportPolicy: 'all',
+        iceCandidatePoolSize: 8,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+      };
+    }
+  }
+
+  private async maybeUpgradeToTurn() {
+    if (!HAS_KEY) return;
+    try {
+      const url = new URL(AUTH_URL);
+      url.searchParams.set('key', process.env.TUNNEL_KEY!);
+      const j = await fetchJSON(url.toString());
+      if (!j?.username || !j?.credential || !j?.ttlSeconds) {
+        this.opts.onStatus('failed to fetch TURN creds');
+        return;
+      }
+      const turnServers: RTCIceServer[] = [
+        { urls: [`turn:${TURN_HOST}:3478?transport=udp`], username: j.username, credential: j.credential },
+        { urls: [`turn:${TURN_HOST}:3478?transport=tcp`], username: j.username, credential: j.credential },
+        { urls: [`turns:${TURN_HOST}:5349?transport=tcp`], username: j.username, credential: j.credential },
+      ];
+      // Update configuration on the fly
+      (this.pc as any).setConfiguration?.({
+        iceServers: turnServers,
+        iceTransportPolicy: 'relay',
+        iceCandidatePoolSize: 8,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+      });
+      this.opts.onStatus(`TURN enabled (expires in ~${Math.floor(j.ttlSeconds/60)}m)`);
+    } catch (e) {
+      this.opts.onStatus(`TURN auth error: ${(e as Error).message || e}`);
+    }
+  }
+
+  // ===== Peer wiring =====
   private attachPeerHandlers() {
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
@@ -96,16 +163,8 @@ export class TunnelPeer {
         this.stopJoinLoop();
         this.clearWatch();
         this.startKeepalive();
-        this.onActivity(); // once on connect
+        this.onActivity(); // start inactivity countdown on connect
         this.opts.onOpen();
-      } else if (s === 'failed' || s === 'disconnected') {
-        if (this.opts.role === 'creator') {
-          if (!this.iceRestarted && this.hasRemoteOffer) {
-            this.iceRestarted = true;
-            this.opts.onStatus('attempting ICE restart…');
-            this.restartIce().catch(() => {});
-          }
-        }
       }
     };
 
@@ -116,12 +175,21 @@ export class TunnelPeer {
       if (s === 'connected' || s === 'completed') this.onActivity();
     };
 
-    this.pc.onicegatheringstatechange = () => {
-      this.opts.onStatus(`ICE gathering: ${this.pc.iceGatheringState}`);
+    // IMPORTANT: trickle candidates to speed up locking to TURN
+    this.pc.onicecandidate = (ev: RTCPeerConnectionIceEvent) => {
+      if (ev.candidate) {
+        this.safeSend({
+          type: 'candidate',
+          name: this.opts.name,
+          candidate: ev.candidate.candidate,
+          sdpMid: ev.candidate.sdpMid,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex,
+        });
+      }
     };
 
-    this.pc.onicecandidate = (ev: RTCPeerConnectionIceEvent) => {
-      if (!ev.candidate) this.opts.onStatus('ICE gathering complete');
+    this.pc.onicegatheringstatechange = () => {
+      this.opts.onStatus(`ICE gathering: ${this.pc.iceGatheringState}`);
     };
 
     if (this.opts.role === 'creator') {
@@ -140,15 +208,13 @@ export class TunnelPeer {
     dc.onmessage = (ev: MessageEvent) => {
       const data = ev.data;
 
-      // IMPORTANT: handle control BEFORE counting activity
+      // Handle control BEFORE counting activity
       if (typeof data === 'string' && data.startsWith(CTRL_PREFIX)) {
         this.handleControl(data.slice(1));
-        return; // do NOT call onActivity() for control frames
+        return; // no inactivity reset for control frames
       }
 
-      // Only real user messages reset inactivity
-      this.onActivity();
-
+      this.onActivity(); // real user traffic only
       const text = typeof data === 'string' ? data : '[binary]';
       this.opts.onMessage(text);
     };
@@ -156,12 +222,13 @@ export class TunnelPeer {
     dc.onerror = () => this.opts.onStatus('data channel error');
   }
 
-  // ===== Signaling socket =============================================
+  // ===== WS signaling =====
   private connectWS() {
     if (this.disposed) return;
     this.ws = new WebSocket(this.opts.signalingURL);
-    this.ws.on('open', () => {
+    this.ws.on('open', async () => {
       this.wsReconnects = 0;
+      await this.maybeUpgradeToTurn();
       this.startSignaling();
     });
     this.ws.on('message', (raw) => this.onSignal(JSON.parse(raw.toString())));
@@ -169,20 +236,19 @@ export class TunnelPeer {
       this.opts.onStatus(`signaling error: ${(err as Error).message || err}`);
     });
     this.ws.on('close', () => {
-      if (this.disposed) return;
-      if (this.isConnected) return; // once connected, signal WS can go away
+      if (this.disposed || this.isConnected) return;
       const delay = Math.min(2000 + this.wsReconnects * 500, 4000);
       this.wsReconnects++;
       setTimeout(() => this.connectWS(), delay);
     });
   }
 
-  // ===== Offer/Answer ==================================================
+  // ===== Offer/Answer (+ trickle) =====
   private async startSignaling() {
     if (this.opts.role === 'creator') {
       const offer = await this.pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
       await this.pc.setLocalDescription(offer);
-      await this.waitForIceGatheringComplete();
+      // Send immediately (trickle ICE)
       this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus(`waiting for a peer to join "${this.opts.name}" …`);
     } else {
@@ -202,12 +268,12 @@ export class TunnelPeer {
     if (msg.type === 'offer' && this.opts.role === 'joiner') {
       this.hasRemoteOffer = true;
       this.stopJoinLoop();
-      this.startConnectWatch(); // monitor until connected
+      this.startConnectWatch();
 
       await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
-      await this.waitForIceGatheringComplete();
+      // Send immediately (trickle ICE)
       this.safeSend({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
       this.opts.onStatus('sent answer');
       return;
@@ -218,19 +284,19 @@ export class TunnelPeer {
       this.opts.onStatus('received answer');
       return;
     }
-  }
 
-  private waitForIceGatheringComplete(): Promise<void> {
-    if (this.pc.iceGatheringState === 'complete') return Promise.resolve();
-    return new Promise((res) => {
-      const check = () => {
-        if (this.pc.iceGatheringState === 'complete') {
-          this.pc.removeEventListener('icegatheringstatechange', check);
-          res();
-        }
-      };
-      this.pc.addEventListener('icegatheringstatechange', check);
-    });
+    if (msg.type === 'candidate' && msg.candidate) {
+      try {
+        await this.pc.addIceCandidate({
+          candidate: msg.candidate,
+          sdpMid: msg.sdpMid ?? null,
+          sdpMLineIndex: msg.sdpMLineIndex ?? null,
+        });
+      } catch (e) {
+        this.opts.onStatus(`addIceCandidate failed: ${(e as Error).message || e}`);
+      }
+      return;
+    }
   }
 
   private safeSend(obj: any) {
@@ -241,7 +307,7 @@ export class TunnelPeer {
     } catch {}
   }
 
-  // ===== Join loop (pre-offer) ========================================
+  // ===== Join loop (pre-offer) =====
   private startJoinLoop() {
     this.stopJoinLoop();
     this.joinActive = true;
@@ -273,7 +339,7 @@ export class TunnelPeer {
     if (this.joinTimer) { clearTimeout(this.joinTimer); this.joinTimer = undefined; }
   }
 
-  // ===== Connection watchdog (joiner) =================================
+  // ===== Connect watch (joiner) =====
   private startConnectWatch() {
     this.clearWatch();
     if (this.opts.role !== 'joiner') return;
@@ -284,26 +350,18 @@ export class TunnelPeer {
         this.opts.onStatus('connection slow, attempting ICE restart…');
         await this.restartIce().catch(() => {});
         this.startConnectWatch(); // re-arm
-      } else if (!this.didFullRestart) {
-        this.didFullRestart = true;
-        this.opts.onStatus('still not connected, performing full restart…');
-        await this.fullRestartJoiner();
       }
     }, WATCH_CONNECT_MS);
   }
+  private clearWatch() { if (this.connectWatch) { clearTimeout(this.connectWatch); this.connectWatch = undefined; } }
 
-  private clearWatch() {
-    if (this.connectWatch) { clearTimeout(this.connectWatch); this.connectWatch = undefined; }
-  }
-
-  // ===== Keepalive on DC (no activity bump) ===========================
+  // ===== Keepalive on DC (does not bump inactivity) =====
   private startKeepalive() {
     this.stopKeepalive();
     if (!this.dc) return;
     const sendPing = () => {
       if (!this.dc || this.dc.readyState !== 'open') return;
       try { this.dc.send(CTRL_PREFIX + 'PING'); } catch {}
-      // arm pong timeout
       this.kaTimeout = setTimeout(() => {
         this.kaMisses++;
         if (this.kaMisses >= KEEPALIVE_MISS_MAX) {
@@ -315,35 +373,27 @@ export class TunnelPeer {
     };
     this.kaTimer = setInterval(sendPing, KEEPALIVE_MS);
   }
-
   private stopKeepalive() {
     if (this.kaTimer) { clearInterval(this.kaTimer); this.kaTimer = undefined; }
     if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; }
     this.kaMisses = 0;
   }
-
   private handleControl(cmd: string) {
-    if (cmd === 'PING') {
-      try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {}
-    } else if (cmd === 'PONG') {
-      if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; }
-      this.kaMisses = 0;
-    }
+    if (cmd === 'PING') { try { this.dc?.send(CTRL_PREFIX + 'PONG'); } catch {} }
+    else if (cmd === 'PONG') { if (this.kaTimeout) { clearTimeout(this.kaTimeout); this.kaTimeout = undefined; } this.kaMisses = 0; }
   }
 
-  // ===== ICE restart & full restart (joiner) ==========================
   private async restartIce() {
     try {
-      await (this.pc as any).setConfiguration?.({ ...rtcConfig, iceTransportPolicy: rtcConfig.iceTransportPolicy });
+      await (this.pc as any).setConfiguration?.(this.makeRtcConfig());
       const offer = await this.pc.createOffer({ iceRestart: true });
       await this.pc.setLocalDescription(offer);
-      await this.waitForIceGatheringComplete();
-
+      // trickle path: just (re)send offer immediately if creator
       if (this.opts.role === 'creator') {
         this.safeSend({ type: 'create', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
         this.opts.onStatus('reposted offer after ICE restart');
       } else {
-        this.safeSend({ type: 'join', name: this.opts.name });
+        this.safeSend({ type: 'join', name: this.opts.name }); // poke server
         this.opts.onStatus('requested fresh offer after ICE restart');
       }
     } catch (e) {
@@ -351,29 +401,7 @@ export class TunnelPeer {
     }
   }
 
-  // Full RTCPeerConnection rebuild for joiner
-  private async fullRestartJoiner() {
-    if (this.opts.role !== 'joiner') return;
-    try { this.dc?.close(); } catch {}
-    try { this.pc.close(); } catch {}
-
-    this.stopKeepalive();
-    this.clearWatch();
-
-    // reset flags
-    this.isConnected = false;
-    this.hasRemoteOffer = false;
-    this.iceRestarted = false;
-
-    // rebuild pc
-    this.pc = new RTCPeerConnection(rtcConfig as any);
-    this.attachPeerHandlers();
-
-    // re-run join
-    this.startJoinLoop();
-  }
-
-  // ===== App API ======================================================
+  // ===== App API =====
   send(text: string) {
     if (this.dc?.readyState === 'open') {
       this.dc.send(text);
@@ -384,12 +412,12 @@ export class TunnelPeer {
   }
 
   private onActivity() {
-    this.opts.onTickInactivity?.(this.INACTIVITY_MS);
+    this.opts.onTickInactivity?.(INACTIVITY_MS);
     if (this.inactivityTimer) clearTimeout(this.inactivityTimer);
     this.inactivityTimer = setTimeout(() => {
       this.opts.onStatus('closing due to inactivity');
       this.close();
-    }, this.INACTIVITY_MS);
+    }, INACTIVITY_MS);
   }
 
   close() {

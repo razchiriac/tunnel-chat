@@ -21,6 +21,7 @@
   "dependencies": {
     "@roamhq/wrtc": "^0.9.0",
     "commander": "^14.0.0",
+    "stripe": "^18.5.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
