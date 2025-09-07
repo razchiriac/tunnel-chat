@@ -75,7 +75,8 @@ program
     'signaling server url (defaults to env TUNNEL_SIGNAL or wss://ditch.chat)',
     DEFAULT_SIGNAL
   )
-  .action(async (nameArg: string | undefined, opts: { signal: string }) => {
+  .option('--peers <n>', 'enable Pro multi-peer hub with max peers', (v: string) => Number(v), 0)
+  .action(async (nameArg: string | undefined, opts: { signal: string; peers?: number }) => {
     const name = nameArg || autoName();
     const role: 'creator' | 'joiner' = nameArg ? 'joiner' : 'creator';
 
@@ -96,6 +97,50 @@ Waiting for peer…`
     } else {
       const proText = proStatus.isPro ? ' [PRO]' : '';
       ui.setStatus(`joining "${name}"${proText} … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
+    }
+
+    // If creator with --peers and Pro, create multi-peer room first
+    if (role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1) {
+      // Open a control WebSocket to send create_multi
+      try {
+        const ws = new (await import('ws')).WebSocket(opts.signal);
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ type: 'create_multi', name, key: process.env.TUNNEL_API_KEY }));
+          ui.setStatus(`multi-peer room created: "${name}" (up to ${opts.peers} peers)`);
+        });
+        ws.on('message', (raw: any) => {
+          try {
+            const msg = JSON.parse(raw.toString());
+            if (msg.type === 'join_request' && typeof msg.peerId === 'string') {
+              // For simplicity, spin up a dedicated TunnelPeer for this joiner using same name; creator role
+              const child = new TunnelPeer({
+                name,
+                role: 'creator',
+                signalingURL: opts.signal,
+                apiKey: process.env.TUNNEL_API_KEY,
+                onOpen: () => ui.setStatus(`peer ${msg.peerId} connected`),
+                onMessage: (text) => ui.showRemote('peer', text),
+                onStatus: (t) => ui.setStatus(t),
+                onClose: () => ui.setStatus(`peer ${msg.peerId} disconnected`),
+                onIce: (s) => ui.setIceState(s),
+                onTickInactivity: (ms) => ui.resetInactivity(ms),
+                onStats: (s) => ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: s.remoteFingerprint || s.localFingerprint })
+              });
+              // Immediately send a per-peer offer via signaling with peerId
+              // We reuse the child's internal signaling flow by posting a custom offer message once localDescription is ready
+              const postOffer = async () => {
+                const offer = await (child as any)['pc'].createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+                await (child as any)['pc'].setLocalDescription(offer);
+                (child as any).sendSignal({ type: 'offer', name, peerId: msg.peerId, sdp: (child as any)['pc'].localDescription?.sdp });
+              };
+              postOffer().catch(() => { });
+            }
+          } catch { }
+        });
+        ws.on('close', () => ui.setStatus('hub socket closed'));
+      } catch (e) {
+        ui.setStatus('failed to create multi-peer room');
+      }
     }
 
     const peer = new TunnelPeer({

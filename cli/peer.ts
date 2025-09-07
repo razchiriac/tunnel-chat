@@ -82,6 +82,7 @@ export class TunnelPeer {
 
   private isConnected = false;
   private hasRemoteOffer = false;
+  private offerPeerId?: string; // set when joining multi-peer room
 
   private joinActive = false;
   private joinStart = 0;
@@ -122,6 +123,9 @@ export class TunnelPeer {
     this.connectWS();
   }
 
+  // Creator-as-hub helper: send typed signaling messages (extended when multi-peer lands in CLI)
+  sendSignal(obj: any) { this.safeSend(obj); }
+
   private attachPeerHandlers() {
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
@@ -153,13 +157,15 @@ export class TunnelPeer {
         if (typeof ev.candidate.candidate === 'string' && ev.candidate.candidate.includes(' typ relay ')) {
           this.sawRelayCandidate = true;
         }
-        this.safeSend({
+        const payload: any = {
           type: 'candidate',
           name: this.opts.name,
           candidate: ev.candidate.candidate,
           sdpMid: ev.candidate.sdpMid,
           sdpMLineIndex: ev.candidate.sdpMLineIndex,
-        });
+        };
+        if (this.offerPeerId) payload.peerId = this.offerPeerId;
+        this.safeSend(payload);
       }
     };
 
@@ -288,13 +294,16 @@ export class TunnelPeer {
 
     if (msg.type === 'offer' && this.opts.role === 'joiner') {
       this.hasRemoteOffer = true;
+      this.offerPeerId = typeof msg.peerId === 'string' ? msg.peerId : undefined;
       this.stopJoinLoop();
       this.startConnectWatch();
 
       await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
-      this.safeSend({ type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp });
+      const ans: any = { type: 'answer', name: this.opts.name, sdp: this.pc.localDescription?.sdp };
+      if (this.offerPeerId) ans.peerId = this.offerPeerId;
+      this.safeSend(ans);
       this.opts.onStatus('sent answer');
       return;
     }

@@ -25,12 +25,17 @@ const stripe = new Stripe(STRIPE_SECRET, {});
 
 // Signaling server types and state
 type RoomRecord = {
-    offerSDP: string;
+    // single-peer legacy fields
+    offerSDP?: string;
+    // owner/creator socket (for both modes)
     offerSocket: WebSocket;
     createdAt: number;
     ttlMs: number;
     ttlTimer: NodeJS.Timeout;
     candidatesToCreator: any[];
+    // multi-peer fields
+    multi?: boolean;
+    joiners?: Map<string, WebSocket>; // peerId -> joiner socket
 };
 
 const rooms = new Map<string, RoomRecord>();
@@ -364,7 +369,7 @@ wss.on('connection', (ws) => {
 
         const { type } = msg || {};
 
-        // CREATE room
+        // CREATE room (single-peer)
         if (type === 'create') {
             const { name, sdp } = msg;
             if (!name || !sdp) { ws.send(JSON.stringify({ type: 'error', error: 'missing_fields' })); return; }
@@ -393,15 +398,46 @@ wss.on('connection', (ws) => {
             return;
         }
 
+        // CREATE multi-peer room (Pro gated by API key)
+        if (type === 'create_multi') {
+            const { name, key } = msg;
+            if (!name || !key) { ws.send(JSON.stringify({ type: 'error', error: 'missing_fields' })); return; }
+            if (!hasKey(key)) { ws.send(JSON.stringify({ type: 'error', error: 'pro_required' })); return; }
+            if (rooms.has(name)) { ws.send(JSON.stringify({ type: 'error', error: 'room_exists' })); return; }
+
+            const ttlTimer = setTimeout(() => deleteRoom(name), TTL_MS);
+            rooms.set(name, {
+                offerSocket: ws,
+                createdAt: Date.now(),
+                ttlMs: TTL_MS,
+                ttlTimer,
+                candidatesToCreator: [],
+                multi: true,
+                joiners: new Map(),
+            });
+            try { ws.send(JSON.stringify({ type: 'created', name, multi: true })); } catch { }
+            return;
+        }
+
         // JOIN room
         if (type === 'join') {
             const { name } = msg;
             if (!name) { ws.send(JSON.stringify({ type: 'error', error: 'missing_fields' })); return; }
             const rec = rooms.get(name);
             if (rec) {
-                ws.send(JSON.stringify({ type: 'offer', name, sdp: rec.offerSDP, info: { createdAt: rec.createdAt } }));
-                (ws as any).__roomName = name;
-                return;
+                if (rec.multi) {
+                    // Assign a peerId and notify creator
+                    const peerId = crypto.randomBytes(6).toString('hex');
+                    (ws as any).__roomName = name;
+                    (ws as any).__peerId = peerId;
+                    rec.joiners!.set(peerId, ws);
+                    try { rec.offerSocket.send(JSON.stringify({ type: 'join_request', name, peerId })); } catch { }
+                    return;
+                } else {
+                    ws.send(JSON.stringify({ type: 'offer', name, sdp: rec.offerSDP, info: { createdAt: rec.createdAt } }));
+                    (ws as any).__roomName = name;
+                    return;
+                }
             }
             // Wait for the creator up to JOIN_WAIT_MS
             const to = setTimeout(() => {
@@ -414,22 +450,53 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        // ANSWER: forward to creator, then delete room
-        if (type === 'answer') {
-            const { name, sdp } = msg;
+        // OFFER (per-peer): forward to the specific joiner
+        if (type === 'offer' && typeof msg.peerId === 'string') {
+            const { name, peerId, sdp } = msg;
             const rec = rooms.get(name);
-            if (!rec) { ws.send(JSON.stringify({ type: 'not_found', name })); return; }
-            try { rec.offerSocket.send(JSON.stringify({ type: 'answer', name, sdp })); }
-            finally { deleteRoom(name); }
-            try { ws.send(JSON.stringify({ type: 'ok' })); } catch { }
+            if (!rec || !rec.multi) { ws.send(JSON.stringify({ type: 'error', error: 'not_multi' })); return; }
+            const target = rec.joiners!.get(peerId);
+            if (!target) { ws.send(JSON.stringify({ type: 'error', error: 'peer_not_found' })); return; }
+            try { target.send(JSON.stringify({ type: 'offer', name, peerId, sdp })); } catch { }
             return;
         }
 
-        // TRICKLE: forward candidate to creator while room exists
-        if (type === 'candidate' && msg.name && typeof msg.candidate === 'string') {
+        // ANSWER: forward to creator (single) or to creator with peerId (multi)
+        if (type === 'answer') {
+            const { name, sdp, peerId } = msg;
+            const rec = rooms.get(name);
+            if (!rec) { ws.send(JSON.stringify({ type: 'not_found', name })); return; }
+            if (rec.multi) {
+                try { rec.offerSocket.send(JSON.stringify({ type: 'answer', name, peerId, sdp })); } catch { }
+                try { ws.send(JSON.stringify({ type: 'ok' })); } catch { }
+                return;
+            } else {
+                try { rec.offerSocket.send(JSON.stringify({ type: 'answer', name, sdp })); }
+                finally { deleteRoom(name); }
+                try { ws.send(JSON.stringify({ type: 'ok' })); } catch { }
+                return;
+            }
+        }
+
+        // TRICKLE (single): forward candidate to creator while room exists
+        if (type === 'candidate' && msg.name && typeof msg.candidate === 'string' && !msg.peerId) {
             const rec = rooms.get(msg.name);
             if (rec) {
                 try { rec.offerSocket.send(JSON.stringify({ type: 'candidate', ...msg })); } catch { }
+            }
+            return;
+        }
+        // TRICKLE (multi): with peerId route creator<->joiner
+        if (type === 'candidate' && msg.name && typeof msg.candidate === 'string' && typeof msg.peerId === 'string') {
+            const rec = rooms.get(msg.name);
+            if (!rec || !rec.multi) return;
+            if (ws === rec.offerSocket) {
+                // from creator to joiner
+                const target = rec.joiners!.get(msg.peerId);
+                if (target) { try { target.send(JSON.stringify({ type: 'candidate', name: msg.name, candidate: msg.candidate, sdpMid: msg.sdpMid, sdpMLineIndex: msg.sdpMLineIndex })); } catch { } }
+            } else {
+                // from joiner to creator
+                try { rec.offerSocket.send(JSON.stringify({ type: 'candidate', name: msg.name, peerId: msg.peerId, candidate: msg.candidate, sdpMid: msg.sdpMid, sdpMLineIndex: msg.sdpMLineIndex })); } catch { }
             }
             return;
         }

@@ -147,21 +147,30 @@
             <!-- Pro Features -->
             <div class="mb-16">
                 <h2 class="text-3xl font-bold text-center mb-8 gradient-text">Your Pro Features</h2>
-                <div class="grid md:grid-cols-3 gap-8">
+                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                    <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 text-center">
+                        <div class="text-4xl mb-4">👥</div>
+                        <h3 class="text-xl font-semibold mb-2">Multi‑peer rooms</h3>
+                        <p class="text-gray-300">Creator-as-hub mesh with per-peer WebRTC.</p>
+                        <div class="bg-gray-900 rounded-lg p-2 mt-3 font-mono text-xs text-blue-300">npx tunnel-chat --peers 5</div>
+                    </div>
+                    <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 text-center">
+                        <div class="text-4xl mb-4">😄</div>
+                        <h3 class="text-xl font-semibold mb-2">Emoji reactions</h3>
+                        <p class="text-gray-300">Send quick reactions without overwriting messages.</p>
+                        <div class="bg-gray-900 rounded-lg p-2 mt-3 font-mono text-xs text-blue-300">/react :rocket:</div>
+                    </div>
                     <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 text-center">
                         <div class="text-4xl mb-4">⚡</div>
-                        <h3 class="text-xl font-semibold mb-2">Premium TURN Servers</h3>
-                        <p class="text-gray-300">Better connectivity and faster peer-to-peer connections</p>
+                        <h3 class="text-xl font-semibold mb-2">Fast‑path + RTT</h3>
+                        <p class="text-gray-300">See STUN/direct vs TURN relay and latency.</p>
+                        <div class="bg-gray-900 rounded-lg p-2 mt-3 font-mono text-xs text-blue-300">/fp</div>
                     </div>
                     <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 text-center">
                         <div class="text-4xl mb-4">🔒</div>
-                        <h3 class="text-xl font-semibold mb-2">Priority Support</h3>
-                        <p class="text-gray-300">Get help faster when you need it</p>
-                    </div>
-                    <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 text-center">
-                        <div class="text-4xl mb-4">🚀</div>
-                        <h3 class="text-xl font-semibold mb-2 gradient-text">Pro Badge</h3>
-                        <p class="text-gray-300">Show off your premium status in the terminal</p>
+                        <h3 class="text-xl font-semibold mb-2">Encryption fingerprint</h3>
+                        <p class="text-gray-300">Verify DTLS fingerprints end‑to‑end.</p>
+                        <div class="bg-gray-900 rounded-lg p-2 mt-3 font-mono text-xs text-blue-300">/fpkey</div>
                     </div>
                 </div>
             </div>
