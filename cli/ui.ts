@@ -37,6 +37,7 @@ export type UI = {
   showRemote(name: string, text: string): void;
   setStatus(text: string): void;
   setIceState(state: string): void;
+  setNetworkStats(info: { pathLabel: string; rttMs?: number; fingerprintShort?: string }): void;
   resetInactivity(totalMs: number): void;
   close(): void;
 };
@@ -103,6 +104,10 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   let disposed = false;
 
   let iceState = 'new';
+  // Network indicators (fast-path, RTT, encryption fingerprint short)
+  let netPath: string = '—';
+  let netRtt: string = '—';
+  let netFpShort: string = '—';
   let inactivityRemainingMs: number | null = null;
   let inactivityTimer: NodeJS.Timeout | null = null;
 
@@ -130,6 +135,13 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   function clearScreen() { process.stdout.write('\x1b[2J\x1b[0f'); }
   function moveTo(x: number, y: number) { process.stdout.write(`\x1b[${y + 1};${x + 1}H`); }
   function padRight(s: string, w: number) { return s + ' '.repeat(Math.max(0, w - stripAnsi(s).length)); }
+  function fmtFpShort(fp?: string): string {
+    if (!fp) return '—';
+    const cleaned = fp.replace(/[^0-9a-fA-F:]/g, '').toUpperCase();
+    const parts = cleaned.split(':').filter(Boolean);
+    if (parts.length >= 3) return `${parts[0]}:${parts[1]}…${parts[parts.length - 1]}`;
+    return cleaned.slice(0, 8) + '…';
+  }
 
   function drawBox(x: number, y: number, w: number, h: number, title?: string) {
     moveTo(x, y); process.stdout.write(BOX.tl + BOX.h.repeat(w - 2) + BOX.tr);
@@ -167,16 +179,12 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     const countdown = `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
     moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
     moveTo(2, 2); process.stdout.write(padRight(`${C.dim}status:${C.reset} ${status}`, totalW - 4));
-    moveTo(2, 3);
-    if (role === 'creator' && !connected) {
-      process.stdout.write(padRight(`${C.dim}share:${C.reset} npx tunnel-chat@latest ${C.bold}${C.fg.magenta}${tunnelName}${C.reset}`, totalW - 4));
-    } else {
-      process.stdout.write(padRight(' ', totalW - 4));
-    }
+    const net = `${C.dim}path:${C.reset} ${netPath}   ${C.dim}RTT:${C.reset} ${netRtt}   ${C.dim}enc:${C.reset} 🔒 ${netFpShort}`;
+    moveTo(2, 3); process.stdout.write(padRight(net, totalW - 4));
 
     // Single conversation pane with messenger-style layout
     const conversationH = contentH;
-    const y0 = titleH;
+    const y0 = titleH; // keep conversation start; we already drew 3 header rows
     drawBox(conversationX, y0, conversationW, conversationH, `${C.bold}${C.fg.cyan}Conversation${C.reset}`);
 
     const innerW = conversationW - 2;
@@ -330,6 +338,12 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     },
     setStatus(text) { status = text; render(); },
     setIceState(state: string) { iceState = state; render(); },
+    setNetworkStats(info) {
+      netPath = info.pathLabel || '—';
+      netRtt = typeof info.rttMs === 'number' ? `${info.rttMs} ms` : '—';
+      netFpShort = info.fingerprintShort || '—';
+      render();
+    },
     resetInactivity(totalMs: number) {
       inactivityRemainingMs = totalMs;
       startInactivityTicker();

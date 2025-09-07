@@ -111,7 +111,11 @@ Waiting for peer…`
       onStatus: (text) => ui.setStatus(text),
       onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
       onIce: (state) => ui.setIceState(state),
-      onTickInactivity: (ms) => ui.resetInactivity(ms)
+      onTickInactivity: (ms) => ui.resetInactivity(ms),
+      onStats: (s) => {
+        const fpShort = s.remoteFingerprint || s.localFingerprint || undefined;
+        ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: fpShort });
+      }
     });
 
     ui.promptInput((line) => {
@@ -122,6 +126,21 @@ Waiting for peer…`
         ui.setStatus(`retrying to join "${name}"${proText} …`);
         return;
       }
+      // Slash commands (local only)
+      if (line.startsWith('/fp')) {
+        const snap = (peer as any).getStatsSnapshot?.();
+        if (!snap) { ui.setStatus('no stats yet'); return; }
+        if (line.trim() === '/fpkey') {
+          const fullLocal = snap.localFingerprint || '—';
+          const fullRemote = snap.remoteFingerprint || '—';
+          const text = `DTLS fingerprints:\nlocal:  ${fullLocal}\nremote: ${fullRemote}`;
+          ui.setStatus(text);
+        } else {
+          ui.setStatus(`path: ${snap.pathLabel}  rtt: ${snap.rttMs ?? '—'} ms  enc: ${snap.remoteFingerprint ? 'present' : '—'}`);
+        }
+        return;
+      }
+
       const ok = peer.send(line);
       if (!ok) ui.setStatus('channel not open yet…');
       else ui.showLocal('you', line);

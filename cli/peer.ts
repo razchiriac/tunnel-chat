@@ -20,6 +20,8 @@ export type PeerOpts = {
   onClose: () => void;
   onIce?: (state: string) => void;
   onTickInactivity?: (totalMs: number) => void;
+  // Optional stats callback for fast-path/RTT/fingerprints; emitted periodically when connected
+  onStats?: (s: FastPathStats) => void;
 };
 
 const CTRL_PREFIX = '\x00';
@@ -56,6 +58,16 @@ function fetchJSON(u: string): Promise<any> {
   });
 }
 
+export type FastPathStats = {
+  pathLabel: string; // "TURN (relay)" or "STUN/direct"
+  candidateType?: string; // relay | srflx | host | prflx
+  rttMs?: number;
+  localIp?: string;
+  remoteIp?: string;
+  localFingerprint?: string;
+  remoteFingerprint?: string;
+};
+
 export class TunnelPeer {
   private pc: RTCPeerConnection;
   private dc?: RTCDataChannel;
@@ -90,6 +102,10 @@ export class TunnelPeer {
   private readonly KEEPALIVE_TIMEOUT_MS = Number(process.env.KEEPALIVE_TIMEOUT_MS || 5000);
   private readonly KEEPALIVE_MISS_MAX = Number(process.env.KEEPALIVE_MISS_MAX || 3);
 
+  // Stats polling
+  private statsTimer?: NodeJS.Timeout;
+  private latestStats?: FastPathStats;
+
   constructor(opts: PeerOpts) {
     this.opts = opts;
     // IMPORTANT: start in STUN mode to avoid instant failures
@@ -116,6 +132,7 @@ export class TunnelPeer {
         this.clearWatch();
         this.startKeepalive();
         this.onActivity();
+        this.startStatsPolling();
         this.opts.onOpen();
       }
     };
@@ -378,6 +395,96 @@ export class TunnelPeer {
     }
   }
 
+  // === Fast-path / RTT / Fingerprints ===
+  private startStatsPolling() {
+    this.stopStatsPolling();
+    const poll = async () => {
+      if (this.disposed) return;
+      try {
+        const snapshot = await this.computeStatsSnapshot();
+        if (snapshot) {
+          this.latestStats = snapshot;
+          this.opts.onStats?.(snapshot);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    // Prime once immediately, then poll periodically
+    poll();
+    this.statsTimer = setInterval(poll, 1500);
+  }
+  private stopStatsPolling() { if (this.statsTimer) clearInterval(this.statsTimer); this.statsTimer = undefined; }
+
+  private async computeStatsSnapshot(): Promise<FastPathStats | undefined> {
+    // Collect stats into maps for easy lookup
+    // Types are any due to wrtc runtime differences; defensive access everywhere.
+    const report: any = await (this.pc as any).getStats();
+    const byId: Record<string, any> = {};
+    const candidatePairs: any[] = [];
+    const transports: any[] = [];
+    const localCandidates: Record<string, any> = {};
+    const remoteCandidates: Record<string, any> = {};
+    const certificates: Record<string, any> = {};
+
+    // report can be Map or array-like
+    const pushEntry = (s: any) => {
+      if (!s || !s.id) return;
+      byId[s.id] = s;
+      if (s.type === 'transport') transports.push(s);
+      else if (s.type === 'candidate-pair') candidatePairs.push(s);
+      else if (s.type === 'local-candidate') localCandidates[s.id] = s;
+      else if (s.type === 'remote-candidate') remoteCandidates[s.id] = s;
+      else if (s.type === 'certificate') certificates[s.id] = s;
+    };
+    if (typeof (report as any).forEach === 'function') {
+      (report as any).forEach((s: any) => pushEntry(s));
+    } else if (Array.isArray(report)) {
+      for (const s of report) pushEntry(s);
+    }
+
+    // Prefer selected from transport
+    let selectedPair: any | undefined;
+    for (const t of transports) {
+      const selId = t.selectedCandidatePairId || t.selectedCandidatePairID || t.candidatePairId;
+      if (selId && byId[selId]) { selectedPair = byId[selId]; break; }
+    }
+    if (!selectedPair) {
+      selectedPair = candidatePairs.find((p: any) => p.nominated || p.selected) || candidatePairs[0];
+    }
+    if (!selectedPair) return undefined;
+
+    const local = byId[selectedPair.localCandidateId] || localCandidates[selectedPair.localCandidateId] || undefined;
+    const remote = byId[selectedPair.remoteCandidateId] || remoteCandidates[selectedPair.remoteCandidateId] || undefined;
+
+    const candidateType: string | undefined = (remote?.candidateType || local?.candidateType || '').toString();
+    const isRelay = candidateType === 'relay';
+    const pathLabel = isRelay ? 'TURN (relay)' : 'STUN/direct';
+
+    const rttSec = typeof selectedPair.currentRoundTripTime === 'number' ? selectedPair.currentRoundTripTime : undefined;
+    const rttMs = rttSec != null ? Math.round(rttSec * 1000) : undefined;
+
+    // IP/Address fields vary by implementation
+    const ipFields = ['ip', 'address', 'ipAddress'];
+    const localIp = local ? (ipFields.map(k => local[k]).find((v: any) => typeof v === 'string') || undefined) : undefined;
+    const remoteIp = remote ? (ipFields.map(k => remote[k]).find((v: any) => typeof v === 'string') || undefined) : undefined;
+
+    // Fingerprints via transport -> certificate ids
+    let localFingerprint: string | undefined;
+    let remoteFingerprint: string | undefined;
+    const anyTransport = transports[0];
+    if (anyTransport) {
+      const localCert = certificates[anyTransport.localCertificateId];
+      const remoteCert = certificates[anyTransport.remoteCertificateId];
+      localFingerprint = localCert?.fingerprint?.toString();
+      remoteFingerprint = remoteCert?.fingerprint?.toString();
+    }
+
+    return { pathLabel, candidateType, rttMs, localIp, remoteIp, localFingerprint, remoteFingerprint };
+  }
+
+  getStatsSnapshot(): FastPathStats | undefined { return this.latestStats; }
+
   send(text: string) {
     if (this.dc?.readyState === 'open') {
       this.dc.send(text);
@@ -401,6 +508,7 @@ export class TunnelPeer {
     if (this.turnGatherTimer) clearTimeout(this.turnGatherTimer);
     this.stopJoinLoop();
     this.stopKeepalive();
+    this.stopStatsPolling();
     this.clearWatch();
     try { this.dc?.close(); } catch { }
     try { this.pc.close(); } catch { }
