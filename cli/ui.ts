@@ -96,10 +96,9 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     ? `Tunnel Chat ${C.fg.yellow}${C.bold}Pro${C.reset}${C.bold}${C.fg.white}`
     : 'Tunnel Chat';
 
-  // State
+  // State - using conversation history instead of separate peer/you messages
   let status = `${C.fg.yellow}waiting…${C.reset}`;
-  let peerMsg = '';
-  let youMsg = '';
+  let conversation: Array<{ sender: 'peer' | 'you'; message: string; timestamp: Date }> = [];
   let inputBuffer = '';
   let disposed = false;
 
@@ -119,14 +118,13 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     const totalW = clamp(process.stdout.columns || 80, 60, 10000);
     const totalH = clamp(process.stdout.rows || 24, 15, 10000);
     const padding = 1;
-    const gutter = 2;
     const titleH = 4;
     const inputH = 3;
     const contentH = totalH - titleH - inputH;
-    const paneW = Math.floor((totalW - gutter - padding * 2) / 2);
-    const leftX = padding;
-    const rightX = padding + paneW + gutter;
-    return { totalW, totalH, padding, gutter, titleH, inputH, contentH, paneW, leftX, rightX };
+    // Single conversation pane that spans most of the width
+    const conversationW = totalW - padding * 2;
+    const conversationX = padding;
+    return { totalW, totalH, padding, titleH, inputH, contentH, conversationW, conversationX };
   }
 
   function clearScreen() { process.stdout.write('\x1b[2J\x1b[0f'); }
@@ -155,7 +153,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   function render() {
     if (disposed) return;
     hideCursor();
-    const { totalW, titleH, inputH, contentH, paneW, leftX, rightX } = dims();
+    const { totalW, titleH, inputH, contentH, conversationW, conversationX } = dims();
     clearScreen();
 
     const ind = iceIndicator(iceState);
@@ -176,18 +174,64 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
       process.stdout.write(padRight(' ', totalW - 4));
     }
 
-    // Content panes
-    const paneH = contentH; const y0 = titleH;
-    drawBox(leftX, y0, paneW, paneH, `${C.bold}${C.fg.blue}Peer${C.reset}`);
-    drawBox(rightX, y0, paneW, paneH, `${C.bold}${C.fg.green}You${C.reset}`);
-    const innerW = paneW - 2, innerH = paneH - 2;
-    const peerLines = wrapText(peerMsg || '—', innerW).slice(-innerH);
-    const youLines = wrapText(youMsg || '—', innerW).slice(-innerH);
-    for (let i = 0; i < innerH; i++) { moveTo(leftX + 1, y0 + 1 + i); process.stdout.write(padRight(peerLines[i] ?? '', innerW)); }
-    for (let i = 0; i < innerH; i++) { moveTo(rightX + 1, y0 + 1 + i); process.stdout.write(padRight(youLines[i] ?? '', innerW)); }
+    // Single conversation pane with messenger-style layout
+    const conversationH = contentH;
+    const y0 = titleH;
+    drawBox(conversationX, y0, conversationW, conversationH, `${C.bold}${C.fg.cyan}Conversation${C.reset}`);
 
-    // Input
-    const inputY = y0 + paneH;
+    const innerW = conversationW - 2;
+    const innerH = conversationH - 2;
+
+    // Generate conversation lines from the conversation history
+    const conversationLines: string[] = [];
+
+    if (conversation.length === 0) {
+      conversationLines.push(`${C.dim}No messages yet. Start typing to begin the conversation...${C.reset}`);
+    } else {
+      // Debug: show conversation count in the title
+      const debugInfo = `${C.dim}[${conversation.length} messages]${C.reset}`;
+      conversationLines.push(debugInfo);
+      // Show recent messages that fit in the available space
+      for (const msg of conversation) {
+        const time = msg.timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+        const sender = msg.sender === 'you' ? `${C.fg.green}You${C.reset}` : `${C.fg.blue}Peer${C.reset}`;
+        const prefix = `${C.dim}[${time}]${C.reset} ${sender}: `;
+
+        // Calculate available width for message content (subtract prefix width)
+        const prefixWidth = stripAnsi(prefix).length;
+        const messageWidth = Math.max(20, innerW - prefixWidth);
+
+        // Wrap the message text and add each line
+        const wrappedLines = wrapText(msg.message, messageWidth);
+
+        if (wrappedLines.length === 0) {
+          conversationLines.push(prefix);
+        } else {
+          // First line includes the prefix
+          conversationLines.push(prefix + wrappedLines[0]);
+          // Subsequent lines are indented to align with message content
+          const indent = ' '.repeat(prefixWidth);
+          for (let i = 1; i < wrappedLines.length; i++) {
+            conversationLines.push(indent + wrappedLines[i]);
+          }
+        }
+
+        // Add a small gap between different messages
+        if (msg !== conversation[conversation.length - 1]) {
+          conversationLines.push('');
+        }
+      }
+    }
+
+    // Display the most recent lines that fit in the conversation pane
+    const displayLines = conversationLines.slice(-innerH);
+    for (let i = 0; i < innerH; i++) {
+      moveTo(conversationX + 1, y0 + 1 + i);
+      process.stdout.write(padRight(displayLines[i] ?? '', innerW));
+    }
+
+    // Input section
+    const inputY = y0 + conversationH;
     drawBox(0, inputY, totalW, inputH, `${C.bold}${C.fg.yellow}Type + Enter to send${C.reset}`);
     const prompt = `${C.dim}>${C.reset} `;
     const maxInputW = totalW - 4 - stripAnsi(prompt).length;
@@ -263,8 +307,15 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
 
   return {
     promptInput(onLine) { onLineCallback = onLine; },
-    showLocal(_name, text) { youMsg = text; render(); },
-    showRemote(_name, text) { peerMsg = text; render(); },
+    // Add messages to the conversation history instead of replacing
+    showLocal(_name, text) {
+      conversation.push({ sender: 'you', message: text, timestamp: new Date() });
+      render();
+    },
+    showRemote(_name, text) {
+      conversation.push({ sender: 'peer', message: text, timestamp: new Date() });
+      render();
+    },
     setStatus(text) { status = text; render(); },
     setIceState(state: string) { iceState = state; render(); },
     resetInactivity(totalMs: number) {
