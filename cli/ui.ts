@@ -237,7 +237,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     const countdown = `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
     moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
     moveTo(2, 2); process.stdout.write(padRight(`${C.dim}status:${C.reset} ${status}`, totalW - 4));
-    const net = `${C.dim}path:${C.reset} ${netPath}   ${C.dim}RTT:${C.reset} ${netRtt}`;
+    const net = `${C.dim}path:${C.reset} ${isPro ? netPath : '—'}   ${C.dim}RTT:${C.reset} ${netRtt}`;
     moveTo(2, 3); process.stdout.write(padRight(net, totalW - 4));
 
     // Single conversation pane with messenger-style layout
