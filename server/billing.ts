@@ -1,8 +1,7 @@
-import http from 'http';
-import { URL } from 'url';
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
+import http from 'http';
+import path from 'path';
 import Stripe from 'stripe';
 
 const PORT = Number(process.env.BILLING_PORT || 8888);
@@ -15,11 +14,11 @@ const stripe = new Stripe(STRIPE_SECRET, { apiVersion: '2024-06-20' });
 
 // ---------- keys.json helpers ----------
 function ensureKeysFile() {
-  try { fs.mkdirSync(path.dirname(KEYS_PATH), { recursive: true }); } catch {}
+  try { fs.mkdirSync(path.dirname(KEYS_PATH), { recursive: true }); } catch { }
   if (!fs.existsSync(KEYS_PATH)) fs.writeFileSync(KEYS_PATH, JSON.stringify({ keys: [] }, null, 2));
 }
 function loadKeys(): string[] {
-  try { const j = JSON.parse(fs.readFileSync(KEYS_PATH,'utf-8')); return j.keys || []; } catch { return []; }
+  try { const j = JSON.parse(fs.readFileSync(KEYS_PATH, 'utf-8')); return j.keys || []; } catch { return []; }
 }
 function saveKeys(arr: string[]) { fs.writeFileSync(KEYS_PATH, JSON.stringify({ keys: arr }, null, 2)); }
 function addKey(k: string) { const s = new Set(loadKeys()); s.add(k); saveKeys([...s]); }
@@ -68,9 +67,9 @@ ensureKeysFile();
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
-    res.setHeader('access-control-allow-origin','*');
-    res.setHeader('access-control-allow-headers','*');
-    res.statusCode=204; return res.end();
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-headers', '*');
+    res.statusCode = 204; return res.end();
   }
 
   if (req.method === 'POST' && req.url === '/create-checkout-session') {
@@ -83,7 +82,7 @@ const server = http.createServer(async (req, res) => {
         cancel_url: 'https://ditch.chat/cancel',
       });
       return json(res, 200, { url: session.url });
-    } catch (e:any) {
+    } catch (e: any) {
       console.error('[billing] create-checkout-session error:', e.message);
       return json(res, 500, { error: e.message || 'stripe_error' });
     }
@@ -98,7 +97,7 @@ const server = http.createServer(async (req, res) => {
         if (!WEBHOOK_SECRET) throw new Error('WEBHOOK_SECRET not set');
         const sig = req.headers['stripe-signature'] as string;
         evt = stripe.webhooks.constructEvent(raw, sig, WEBHOOK_SECRET);
-      } catch (e:any) {
+      } catch (e: any) {
         console.error('[billing] webhook signature error:', e.message);
         res.statusCode = 400; return res.end(`Webhook Error: ${e.message}`);
       }
@@ -162,7 +161,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         res.end('ok');
-      } catch (e:any) {
+      } catch (e: any) {
         console.error('[billing] webhook handler error:', e.message);
         res.statusCode = 500; res.end(e.message || 'handler_error');
       }
