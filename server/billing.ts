@@ -169,6 +169,51 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Auth endpoint: retrieve key by email
+  if (req.method === 'GET' && req.url?.startsWith('/auth/key')) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const email = url.searchParams.get('email');
+
+    if (!email) {
+      return json(res, 400, { error: 'email parameter required' });
+    }
+
+    try {
+      // Search for customer by email in Stripe
+      const customers = await stripe.customers.list({
+        email: email,
+        limit: 1,
+      });
+
+      if (customers.data.length === 0) {
+        return json(res, 404, { error: 'no_customer_found' });
+      }
+
+      const customer = customers.data[0];
+      const apiKey = customer.metadata?.ditch_api_key;
+
+      if (!apiKey) {
+        return json(res, 404, { error: 'no_api_key_found' });
+      }
+
+      // Verify the key still exists in our keys store
+      if (!loadKeys().includes(apiKey)) {
+        console.log('[billing] key not found in store, removing from customer metadata');
+        await stripe.customers.update(customer.id, {
+          metadata: { ...customer.metadata, ditch_api_key: '' }
+        });
+        return json(res, 404, { error: 'api_key_revoked' });
+      }
+
+      console.log('[billing] API key retrieved for email:', email);
+      return json(res, 200, { key: apiKey });
+
+    } catch (e: any) {
+      console.error('[billing] auth/key error:', e.message);
+      return json(res, 500, { error: e.message || 'server_error' });
+    }
+  }
+
   // Debug helper: fetch keys (optional; disable in prod)
   if (req.method === 'GET' && req.url === '/keys') {
     return json(res, 200, { path: KEYS_PATH, keys: loadKeys() });
@@ -181,5 +226,5 @@ server.listen(PORT, () => {
   console.log(`[billing] listening on 0.0.0.0:${PORT}`);
   console.log(`[billing] STRIPE_WEBHOOK_SECRET set? ${WEBHOOK_SECRET ? 'yes' : 'NO'}`);
   console.log(`[billing] KEYS_PATH ${path.resolve(KEYS_PATH)}`);
-  console.log(`[billing] endpoints: POST /create-checkout-session, POST /webhook, GET /keys (debug)`);
+  console.log(`[billing] endpoints: POST /create-checkout-session, POST /webhook, GET /auth/key, GET /keys (debug)`);
 });
