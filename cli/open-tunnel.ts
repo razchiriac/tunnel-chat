@@ -18,16 +18,36 @@ async function checkProStatus(signalingURL: string): Promise<{ isPro: boolean; k
   try {
     // Use the signaling server's /auth/turn endpoint to validate the key
     const serverURL = signalingURL.replace('wss://', 'https://').replace('ws://', 'http://');
+
+    // Add timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
     const response = await fetch(`${serverURL}/auth/turn?key=${encodeURIComponent(apiKey)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (response.ok) {
       // Key is valid - user is Pro
       return { isPro: true, keyValid: true };
+    } else if (response.status === 500) {
+      // Server error (likely TURN_SECRET not set) but key might be valid
+      const errorData = await response.json().catch(() => ({}));
+      if (errorData.error === 'TURN_SECRET not set') {
+        // Key is valid but server can't generate TURN credentials
+        console.warn('⚠️  TURN server not configured, but Pro status enabled.');
+        return { isPro: true, keyValid: true };
+      } else {
+        // Other server error
+        console.warn('⚠️  Server error checking Pro status. Using free tier.');
+        return { isPro: false, keyValid: false };
+      }
     } else {
       // Key is invalid or expired
       console.warn('⚠️  API key is invalid or expired. Pro features disabled.');
@@ -35,6 +55,11 @@ async function checkProStatus(signalingURL: string): Promise<{ isPro: boolean; k
     }
   } catch (error) {
     // Network error or server unavailable - assume non-Pro but don't show error
+    if ((error as Error).name === 'AbortError') {
+      console.warn('⚠️  Pro status check timed out. Using free tier.');
+    } else {
+      console.warn('⚠️  Could not verify Pro status. Using free tier.');
+    }
     return { isPro: false, keyValid: false };
   }
 }
