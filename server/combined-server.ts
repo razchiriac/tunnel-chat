@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto, { createHmac } from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -302,6 +302,115 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: e.message || 'server_error' }));
         }
         return;
+    }
+
+    // ==========================
+    // Pro uploads: presigned URLs
+    // POST /auth/upload  body: { filename, size, mime }
+    // Auth: Authorization: Bearer <key>
+    if (req.method === 'POST' && req.url === '/auth/upload') {
+        try {
+            const auth = (req.headers['authorization'] || '').toString();
+            const key = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+            if (!key || !hasKey(key)) { return json(res, 401, { error: 'invalid_key' }); }
+
+            let raw = '';
+            await new Promise<void>((resolve) => { req.on('data', c => raw += c); req.on('end', () => resolve()); });
+            let body: any = {};
+            try { body = JSON.parse(raw || '{}'); } catch { return json(res, 400, { error: 'bad_json' }); }
+            const filename = (body.filename || '').toString();
+            const size = Number(body.size || 0);
+            const mime = (body.mime || 'application/octet-stream').toString();
+            if (!filename || !Number.isFinite(size) || size <= 0) return json(res, 400, { error: 'missing_fields' });
+
+            const MAX_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 10 * 1024 * 1024);
+            if (size > MAX_BYTES) return json(res, 413, { error: 'too_large', max: MAX_BYTES });
+
+            const provider = (process.env.STORAGE_PROVIDER || 's3').toLowerCase();
+            if (provider !== 's3' && provider !== 'r2') return json(res, 500, { error: 'unsupported_provider' });
+
+            const bucket = process.env.S3_BUCKET || '';
+            const region = process.env.S3_REGION || 'us-east-1';
+            const accessKey = process.env.S3_ACCESS_KEY_ID || '';
+            const secretKey = process.env.S3_SECRET_ACCESS_KEY || '';
+            const endpoint = process.env.S3_ENDPOINT || '';
+            const publicBase = process.env.S3_PUBLIC_BASE || '';
+            const ttlSec = Number(process.env.PRESIGN_TTL_SECONDS || 600);
+
+            if (!bucket || !accessKey || !secretKey) return json(res, 500, { error: 'storage_not_configured' });
+
+            function sanitizeName(n: string) {
+                return n.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 180);
+            }
+            const keyName = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${sanitizeName(filename)}`;
+
+            const host = endpoint
+                ? new URL(endpoint).host
+                : provider === 'r2'
+                    ? `${process.env.R2_ACCOUNT_ID ?? ''}.r2.cloudflarestorage.com`
+                    : `s3.${region}.amazonaws.com`;
+            const protocol = endpoint ? new URL(endpoint).protocol : 'https:';
+            const pathPrefix = endpoint ? `/${bucket}` : `/${bucket}`;
+
+            // AWS SigV4 utils
+            const amzDate = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') + 'Z';
+            const shortDate = amzDate.slice(0, 8);
+            const service = 's3';
+            const credentialScope = `${shortDate}/${region}/${service}/aws4_request`;
+            const alg = 'AWS4-HMAC-SHA256';
+
+            function hmac(keyBuf: Buffer | string, data: string) { return createHmac('sha256', keyBuf).update(data).digest(); }
+            function sha256Hex(s: string) { return createHmac('sha256', '').update(s).digest('hex'); }
+            function signKey(secret: string) {
+                const kDate = hmac('AWS4' + secret, shortDate);
+                const kRegion = hmac(kDate, region);
+                const kService = hmac(kRegion, service);
+                const kSigning = hmac(kService, 'aws4_request');
+                return kSigning;
+            }
+            function encodeRFC3986(str: string) {
+                return encodeURIComponent(str).replace(/[!*'()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+            }
+
+            // Build canonical request for PUT
+            const canonicalUri = `${pathPrefix}/${encodeRFC3986(keyName)}`;
+            const queryBase = new URLSearchParams({
+                'X-Amz-Algorithm': alg,
+                'X-Amz-Credential': `${accessKey}/${credentialScope}`,
+                'X-Amz-Date': amzDate,
+                'X-Amz-Expires': String(ttlSec),
+                'X-Amz-SignedHeaders': 'host',
+            });
+            const canonicalQuery = queryBase.toString();
+            const canonicalHeaders = `host:${host}\n`;
+            const signedHeaders = 'host';
+            const payloadHash = 'UNSIGNED-PAYLOAD';
+            const canonicalRequest = ['PUT', canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+            const stringToSign = [alg, amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
+            const signature = createHmac('sha256', signKey(secretKey)).update(stringToSign).digest('hex');
+            const putUrl = `${protocol}//${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+
+            // Public GET URL: prefer configured public base, else presign a GET similarly
+            let getUrl = publicBase ? `${publicBase.replace(/\/$/, '')}/${keyName}` : '';
+            if (!getUrl) {
+                const q2 = new URLSearchParams({
+                    'X-Amz-Algorithm': alg,
+                    'X-Amz-Credential': `${accessKey}/${credentialScope}`,
+                    'X-Amz-Date': amzDate,
+                    'X-Amz-Expires': String(ttlSec),
+                    'X-Amz-SignedHeaders': 'host',
+                });
+                const canReq2 = ['GET', canonicalUri, q2.toString(), canonicalHeaders, signedHeaders, payloadHash].join('\n');
+                const sts2 = [alg, amzDate, credentialScope, sha256Hex(canReq2)].join('\n');
+                const sig2 = createHmac('sha256', signKey(secretKey)).update(sts2).digest('hex');
+                getUrl = `${protocol}//${host}${canonicalUri}?${q2.toString()}&X-Amz-Signature=${sig2}`;
+            }
+
+            return json(res, 200, { putUrl, getUrl, key: keyName, expiresAt: Date.now() + ttlSec * 1000 });
+        } catch (e: any) {
+            console.error('[upload] error:', e?.message || e);
+            return json(res, 500, { error: 'server_error' });
+        }
     }
 
     // Home page
