@@ -116,6 +116,11 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   let reactionText: string | null = null;
   let reactionTimer: NodeJS.Timeout | null = null;
 
+  // Rendering controls: coalesce frames to avoid flicker and only full-clear when needed
+  let framePending: NodeJS.Timeout | null = null;
+  let needsFullClear = true; // first render and on resize/theme changes
+  let lastDimsSig = '';
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '' });
   readline.emitKeypressEvents(process.stdin, rl as any);
   if (process.stdin.isTTY) process.stdin.setRawMode?.(true);
@@ -211,7 +216,14 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     if (disposed) return;
     hideCursor();
     const { totalW, titleH, inputH, contentH, conversationW, conversationX } = dims();
-    clearScreen();
+
+    // Only clear the whole screen when dimensions change or explicitly requested
+    const sig = `${totalW}x${titleH}:${inputH}:${contentH}:${conversationW}:${conversationX}`;
+    if (needsFullClear || sig !== lastDimsSig) {
+      clearScreen();
+      needsFullClear = false;
+      lastDimsSig = sig;
+    }
 
     const ind = iceIndicator(iceState);
     const connected = iceState === 'connected' || iceState === 'completed';
@@ -334,7 +346,7 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
   (process.stdin as any).on('keypress', onKeypress);
 
   // resize support
-  const onResize = () => render();
+  const onResize = () => { needsFullClear = true; queueRender(); };
   process.stdout.on('resize', onResize);
 
   let onLineCallback: ((line: string) => void) | null = null;
@@ -357,8 +369,13 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     inactivityTimer = setInterval(() => {
       if (inactivityRemainingMs == null) return;
       inactivityRemainingMs = Math.max(0, inactivityRemainingMs - 1000);
-      render();
+      queueRender();
     }, 1000);
+  }
+
+  function queueRender() {
+    if (framePending) return;
+    framePending = setTimeout(() => { framePending && clearTimeout(framePending); framePending = null; render(); }, 33);
   }
 
   const safeExit = () => cleanupAndExit();
@@ -378,36 +395,37 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
       // Remove any previous local message, then add the latest
       conversation = conversation.filter(m => m.sender !== 'you');
       conversation.push({ sender: 'you', message: text, timestamp: new Date() });
-      render();
+      queueRender();
     },
     showRemote(_name, text) {
       // Remove any previous peer message, then add the latest
       conversation = conversation.filter(m => m.sender !== 'peer');
       conversation.push({ sender: 'peer', message: text, timestamp: new Date() });
-      render();
+      queueRender();
     },
-    setStatus(text) { status = text; render(); },
-    setIceState(state: string) { iceState = state; render(); },
+    setStatus(text) { status = text; queueRender(); },
+    setIceState(state: string) { iceState = state; queueRender(); },
     setNetworkStats(info) {
       netPath = info.pathLabel || '—';
       netRtt = typeof info.rttMs === 'number' ? `${info.rttMs} ms` : '—';
       netFpShort = info.fingerprintShort || '—';
-      render();
+      queueRender();
     },
     resetInactivity(totalMs: number) {
       inactivityRemainingMs = totalMs;
       startInactivityTicker();
-      render();
+      queueRender();
     },
     showReaction(emoji: string) {
       if (reactionTimer) clearTimeout(reactionTimer);
       reactionText = emoji;
-      render();
-      reactionTimer = setTimeout(() => { reactionText = null; render(); }, 2500);
+      queueRender();
+      reactionTimer = setTimeout(() => { reactionText = null; queueRender(); }, 2500);
     },
     setTheme(name: string) {
       themeName = name.toLowerCase();
-      render();
+      needsFullClear = true;
+      queueRender();
     },
     close() { cleanupAndExit(); }
   };
