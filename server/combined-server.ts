@@ -330,7 +330,7 @@ const server = http.createServer(async (req, res) => {
             if (provider !== 's3' && provider !== 'r2') return json(res, 500, { error: 'unsupported_provider' });
 
             const bucket = process.env.S3_BUCKET || '';
-            const region = process.env.S3_REGION || 'us-east-1';
+            const region = process.env.S3_REGION || (provider === 'r2' ? 'auto' : 'us-east-1');
             const accessKey = process.env.S3_ACCESS_KEY_ID || '';
             const secretKey = process.env.S3_SECRET_ACCESS_KEY || '';
             const endpoint = process.env.S3_ENDPOINT || '';
@@ -360,7 +360,7 @@ const server = http.createServer(async (req, res) => {
             const alg = 'AWS4-HMAC-SHA256';
 
             function hmac(keyBuf: Buffer | string, data: string) { return createHmac('sha256', keyBuf).update(data).digest(); }
-            function sha256Hex(s: string) { return createHmac('sha256', '').update(s).digest('hex'); }
+            function sha256Hex(s: string) { return crypto.createHash('sha256').update(s).digest('hex'); }
             function signKey(secret: string) {
                 const kDate = hmac('AWS4' + secret, shortDate);
                 const kRegion = hmac(kDate, region);
