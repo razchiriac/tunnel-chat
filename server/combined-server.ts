@@ -374,9 +374,11 @@ const server = http.createServer(async (req, res) => {
                 return encodeURIComponent(str).replace(/[!*'()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
             }
             function buildCanonicalQuery(params: Record<string, string>) {
+                // Build canonical query string for AWS SigV4
+                // Keys and values must be URI-encoded, then sorted by key name
                 const pairs = Object.keys(params)
+                    .sort() // Sort keys first
                     .map((k) => [encodeRFC3986(k), encodeRFC3986(params[k])]) as Array<[string, string]>;
-                pairs.sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) : a[0] < b[0] ? -1 : 1));
                 return pairs.map(([k, v]) => `${k}=${v}`).join('&');
             }
 
