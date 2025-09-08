@@ -82,6 +82,38 @@ program
   )
   .option('--peers <n>', 'enable Pro multi-peer hub with max peers', (v: string) => Number(v), 0)
   .option('--theme <name>', 'set theme: default|matrix|solarized|mono')
+  .addHelpText('after', `
+Examples:
+  npx tunnel-chat                    # Create new tunnel
+  npx tunnel-chat my-tunnel          # Join existing tunnel
+  npx tunnel-chat --theme matrix     # Use matrix theme
+
+In-chat commands:
+  /help or /?        Show help
+  /copy              Copy last received file URL to clipboard
+  /send <path>       Upload and send a file (Pro)
+  /upload            Open file picker to upload (Pro)
+  /react <emoji>     Send emoji reaction (Pro)
+  /theme <name>      Change theme (Pro)
+  /fp                Show connection stats
+  /fpkey             Show DTLS fingerprints
+  r + Enter          Retry connection (when joining)
+
+Pro features (require TUNNEL_API_KEY):
+  • File uploads up to 10MB via secure presigned URLs
+  • Emoji reactions and custom themes
+  • Multi-peer hubs with --peers option
+  • Priority TURN relay servers
+
+Environment variables:
+  TUNNEL_API_KEY     Your Pro API key
+  TUNNEL_SIGNAL      Signaling server (default: wss://ditch.chat)
+  BILLING_SERVER     Billing server (default: https://ditch.chat)
+  MAX_UPLOAD_BYTES   Max file size (default: 10485760)
+
+Get Pro access:
+  npx tunnel-chat upgrade           # Start payment process
+  npx tunnel-chat auth <email>      # Retrieve API key after payment`)
   .action(async (nameArg: string | undefined, opts: { signal: string; peers?: number; theme?: string }) => {
     const name = nameArg || autoName();
     const role: 'creator' | 'joiner' = nameArg ? 'joiner' : 'creator';
@@ -299,6 +331,27 @@ Waiting for peer…`
         const okSend = (peer as any)?.send?.(JSON.stringify({ type: 'reaction', emoji }));
         if (!okSend) ui.setStatus('channel not open yet…');
         else ui.showReaction(emoji);
+        return;
+      }
+      if (line.startsWith('/help') || line.trim() === '/?') {
+        const helpText = `Available commands:
+/help or /?        - Show this help
+/copy              - Copy last received file URL to clipboard
+/send <path>       - Upload and send a file (Pro)
+/upload            - Open file picker to upload (Pro)
+/react <emoji>     - Send emoji reaction (Pro)
+/theme <name>      - Change theme: default|matrix|solarized|mono (Pro)
+/fp                - Show connection stats and encryption info
+/fpkey             - Show full DTLS fingerprints for verification
+
+File uploads (Pro):
+- Drag and drop a file path into the terminal
+- Files up to 10MB supported
+- Secure presigned URLs via Cloudflare R2
+
+Pro features require TUNNEL_API_KEY environment variable.
+Upgrade: npx tunnel-chat upgrade`;
+        ui.setStatus(helpText);
         return;
       }
       if (line.startsWith('/copy')) {
