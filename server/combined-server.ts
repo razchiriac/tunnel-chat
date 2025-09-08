@@ -330,7 +330,8 @@ const server = http.createServer(async (req, res) => {
             if (provider !== 's3' && provider !== 'r2') return json(res, 500, { error: 'unsupported_provider' });
 
             const bucket = process.env.S3_BUCKET || '';
-            const region = process.env.S3_REGION || (provider === 'r2' ? 'auto' : 'us-east-1');
+            // Cloudflare R2 requires SigV4 region to be exactly "auto" regardless of any S3_REGION value
+            const region = provider === 'r2' ? 'auto' : (process.env.S3_REGION || 'us-east-1');
             const accessKey = process.env.S3_ACCESS_KEY_ID || '';
             const secretKey = process.env.S3_SECRET_ACCESS_KEY || '';
             const endpoint = process.env.S3_ENDPOINT || '';
@@ -369,19 +370,26 @@ const server = http.createServer(async (req, res) => {
                 return kSigning;
             }
             function encodeRFC3986(str: string) {
+                // RFC3986 encoding (spaces as %20, not '+', and encode !*'())
                 return encodeURIComponent(str).replace(/[!*'()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+            }
+            function buildCanonicalQuery(params: Record<string, string>) {
+                const pairs = Object.keys(params)
+                    .map((k) => [encodeRFC3986(k), encodeRFC3986(params[k])]) as Array<[string, string]>;
+                pairs.sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) : a[0] < b[0] ? -1 : 1));
+                return pairs.map(([k, v]) => `${k}=${v}`).join('&');
             }
 
             // Build canonical request for PUT
             const canonicalUri = `${pathPrefix}/${encodeRFC3986(keyName)}`;
-            const queryBase = new URLSearchParams({
+            const queryParams = {
                 'X-Amz-Algorithm': alg,
                 'X-Amz-Credential': `${accessKey}/${credentialScope}`,
                 'X-Amz-Date': amzDate,
                 'X-Amz-Expires': String(ttlSec),
                 'X-Amz-SignedHeaders': 'host',
-            });
-            const canonicalQuery = queryBase.toString();
+            } as Record<string, string>;
+            const canonicalQuery = buildCanonicalQuery(queryParams);
             const canonicalHeaders = `host:${host}\n`;
             const signedHeaders = 'host';
             const payloadHash = 'UNSIGNED-PAYLOAD';
@@ -393,17 +401,18 @@ const server = http.createServer(async (req, res) => {
             // Public GET URL: prefer configured public base, else presign a GET similarly
             let getUrl = publicBase ? `${publicBase.replace(/\/$/, '')}/${keyName}` : '';
             if (!getUrl) {
-                const q2 = new URLSearchParams({
+                const q2Params = {
                     'X-Amz-Algorithm': alg,
                     'X-Amz-Credential': `${accessKey}/${credentialScope}`,
                     'X-Amz-Date': amzDate,
                     'X-Amz-Expires': String(ttlSec),
                     'X-Amz-SignedHeaders': 'host',
-                });
-                const canReq2 = ['GET', canonicalUri, q2.toString(), canonicalHeaders, signedHeaders, payloadHash].join('\n');
+                } as Record<string, string>;
+                const q2 = buildCanonicalQuery(q2Params);
+                const canReq2 = ['GET', canonicalUri, q2, canonicalHeaders, signedHeaders, payloadHash].join('\n');
                 const sts2 = [alg, amzDate, credentialScope, sha256Hex(canReq2)].join('\n');
                 const sig2 = createHmac('sha256', signKey(secretKey)).update(sts2).digest('hex');
-                getUrl = `${protocol}//${host}${canonicalUri}?${q2.toString()}&X-Amz-Signature=${sig2}`;
+                getUrl = `${protocol}//${host}${canonicalUri}?${q2}&X-Amz-Signature=${sig2}`;
             }
 
             return json(res, 200, { putUrl, getUrl, key: keyName, expiresAt: Date.now() + ttlSec * 1000 });
