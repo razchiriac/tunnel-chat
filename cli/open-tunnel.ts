@@ -165,6 +165,9 @@ Waiting for peer…`
           if (obj && obj.type === 'file' && typeof obj.name === 'string' && typeof obj.url === 'string') {
             const sizeStr = typeof obj.size === 'number' ? ` · ${(obj.size / (1024 * 1024)).toFixed(1)}MB` : '';
             ui.showRemote('peer', `📎 ${obj.name}${sizeStr} → ${obj.url}`);
+            // Store last received file URL for /copy command
+            (global as any).lastFileUrl = obj.url;
+            (global as any).lastFileName = obj.name;
             return;
           }
         } catch { }
@@ -296,6 +299,30 @@ Waiting for peer…`
         const okSend = (peer as any)?.send?.(JSON.stringify({ type: 'reaction', emoji }));
         if (!okSend) ui.setStatus('channel not open yet…');
         else ui.showReaction(emoji);
+        return;
+      }
+      if (line.startsWith('/copy')) {
+        const lastUrl = (global as any).lastFileUrl;
+        const lastName = (global as any).lastFileName;
+        if (!lastUrl) { ui.setStatus('No file received yet to copy'); return; }
+        try {
+          const { spawn } = await import('child_process');
+          if (process.platform === 'darwin') {
+            const proc = spawn('pbcopy');
+            proc.stdin.write(lastUrl);
+            proc.stdin.end();
+            ui.setStatus(`Copied ${lastName || 'file'} URL to clipboard`);
+          } else if (process.platform === 'linux') {
+            const proc = spawn('xclip', ['-selection', 'clipboard']);
+            proc.stdin.write(lastUrl);
+            proc.stdin.end();
+            ui.setStatus(`Copied ${lastName || 'file'} URL to clipboard`);
+          } else {
+            ui.setStatus(`Last file URL: ${lastUrl}`);
+          }
+        } catch (e) {
+          ui.setStatus(`Last file URL: ${lastUrl}`);
+        }
         return;
       }
       if (line.startsWith('/send ')) {
