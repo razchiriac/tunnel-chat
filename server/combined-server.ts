@@ -383,7 +383,8 @@ const server = http.createServer(async (req, res) => {
             }
 
             // Build canonical request for PUT
-            const canonicalUri = `${pathPrefix}/${encodeRFC3986(keyName)}`;
+            // pathPrefix already includes leading slash and bucket, keyName should not be double-encoded for path separator
+            const canonicalUri = `${pathPrefix}/${keyName.split('/').map(encodeRFC3986).join('/')}`;
             const queryParams = {
                 'X-Amz-Algorithm': alg,
                 'X-Amz-Credential': `${accessKey}/${credentialScope}`,
