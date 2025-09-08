@@ -334,7 +334,8 @@ Waiting for peer…`
         return;
       }
       if (line.startsWith('/help') || line.trim() === '/?') {
-        const helpText = `Available commands:
+        // Display help in conversation area, not status
+        ui.showLocal('help', `Available commands:
 /help or /?        - Show this help
 /copy              - Copy last received file URL to clipboard
 /send <path>       - Upload and send a file (Pro)
@@ -350,8 +351,7 @@ File uploads (Pro):
 - Secure presigned URLs via Cloudflare R2
 
 Pro features require TUNNEL_API_KEY environment variable.
-Upgrade: npx tunnel-chat upgrade`;
-        ui.setStatus(helpText);
+Upgrade: npx tunnel-chat upgrade`);
         return;
       }
       if (line.startsWith('/copy')) {
