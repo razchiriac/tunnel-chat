@@ -243,7 +243,8 @@ Waiting for peer…`
 
         ui.setStatus(`uploading ${filename}…`);
         const stream = fs.createReadStream(filePath);
-        const putRes = await fetch(info.putUrl, { method: 'PUT', headers: { 'content-type': mime }, body: stream as any });
+        const putOpts: any = { method: 'PUT', headers: { 'content-type': mime, 'content-length': String(st.size) }, body: stream, duplex: 'half' };
+        const putRes = await fetch(info.putUrl, putOpts);
         if (!putRes.ok) { ui.setStatus(`upload failed: ${putRes.status}`); return; }
 
         const payload = { type: 'file', name: filename, size: st.size, url: info.getUrl };
