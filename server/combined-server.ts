@@ -417,9 +417,11 @@ const server = http.createServer(async (req, res) => {
                 getUrl = `${protocol}//${host}${canonicalUri}?${q2}&X-Amz-Signature=${sig2}`;
             }
 
-            // Debug: log the URLs before sending
-            console.log('[upload] putUrl contains &:', putUrl.includes('&'));
-            console.log('[upload] putUrl contains &amp;:', putUrl.includes('&amp;'));
+            // Debug: log the signature components
+            console.log('[upload] canonicalUri:', canonicalUri);
+            console.log('[upload] canonicalQuery:', canonicalQuery);
+            console.log('[upload] canonicalRequest hash:', sha256Hex(canonicalRequest));
+            console.log('[upload] stringToSign:', stringToSign.replace(/\n/g, '\\n'));
             return json(res, 200, { putUrl, getUrl, key: keyName, expiresAt: Date.now() + ttlSec * 1000 });
         } catch (e: any) {
             console.error('[upload] error:', e?.message || e);
