@@ -417,6 +417,9 @@ const server = http.createServer(async (req, res) => {
                 getUrl = `${protocol}//${host}${canonicalUri}?${q2}&X-Amz-Signature=${sig2}`;
             }
 
+            // Debug: log the URLs before sending
+            console.log('[upload] putUrl contains &:', putUrl.includes('&'));
+            console.log('[upload] putUrl contains &amp;:', putUrl.includes('&amp;'));
             return json(res, 200, { putUrl, getUrl, key: keyName, expiresAt: Date.now() + ttlSec * 1000 });
         } catch (e: any) {
             console.error('[upload] error:', e?.message || e);
