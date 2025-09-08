@@ -1,6 +1,6 @@
 {
   "name": "tunnel-chat",
-  "version": "1.0.55",
+  "version": "1.0.56",
   "description": "Ephemeral peer-to-peer tunnel chat from the terminal",
   "type": "module",
   "bin": {
