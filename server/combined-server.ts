@@ -331,7 +331,7 @@ const server = http.createServer(async (req, res) => {
 
             const bucket = process.env.S3_BUCKET || '';
             // Cloudflare R2 requires SigV4 region to be exactly "auto" regardless of any S3_REGION value
-            const region = provider === 'r2' ? 'auto' : (process.env.S3_REGION || 'us-east-1');
+            const region = provider === 'r2' ? 'auto' : (process.env.S3_REGION || 'auto');
             const accessKey = process.env.S3_ACCESS_KEY_ID || '';
             const secretKey = process.env.S3_SECRET_ACCESS_KEY || '';
             const endpoint = process.env.S3_ENDPOINT || '';
