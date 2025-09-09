@@ -151,7 +151,7 @@ Waiting for peer…`
         const ws = new (await import('ws')).WebSocket(opts.signal);
         multiPeerWs = ws;
         ws.on('open', () => {
-          ws.send(JSON.stringify({ type: 'create_multi', name, key: process.env.TUNNEL_API_KEY }));
+          ws.send(JSON.stringify({ type: 'create_multi', name, key: process.env.TUNNEL_API_KEY, maxPeers: opts.peers }));
           ui.setStatus(`multi-peer room created: "${name}" (up to ${opts.peers} peers)`);
         });
         ws.on('message', async (raw: any) => {
@@ -282,40 +282,45 @@ Waiting for peer…`
       }
     }
 
-    const peer = new TunnelPeer({
-      name,
-      role,
-      signalingURL: opts.signal,
-      apiKey: proStatus.isPro ? process.env.TUNNEL_API_KEY : undefined, // Pass API key for premium TURN servers
-      onOpen: () => {
-        const proText = proStatus.isPro ? ' [PRO]' : '';
-        ui.setStatus(`connected on "${name}"${proText}. Showing last message from each sender.`);
-      },
-      onMessage: (text) => {
-        // Render file payloads nicely if received as JSON
-        try {
-          const obj = JSON.parse(text);
-          if (obj && obj.type === 'file' && typeof obj.name === 'string' && typeof obj.url === 'string') {
-            const sizeStr = typeof obj.size === 'number' ? ` · ${(obj.size / (1024 * 1024)).toFixed(1)}MB` : '';
-            ui.showRemote('peer', `📎 ${obj.name}${sizeStr} → ${obj.url}`);
-            // Store last received file URL for /copy command
-            (global as any).lastFileUrl = obj.url;
-            (global as any).lastFileName = obj.name;
-            return;
-          }
-        } catch { }
-        ui.showRemote('peer', text);
-      },
-      onStatus: (text) => ui.setStatus(text),
-      onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
-      onIce: (state) => ui.setIceState(state),
-      onTickInactivity: (ms) => ui.resetInactivity(ms),
-      onStats: (s) => {
-        const fpShort = s.remoteFingerprint || s.localFingerprint || undefined;
-        ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: fpShort });
-      },
-      onReaction: (emoji) => ui.showReaction(emoji)
-    });
+    // For multi-peer creators, we don't need a main TunnelPeer since we handle connections directly
+    let peer: TunnelPeer | null = null;
+
+    if (!(role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1)) {
+      peer = new TunnelPeer({
+        name,
+        role,
+        signalingURL: opts.signal,
+        apiKey: proStatus.isPro ? process.env.TUNNEL_API_KEY : undefined, // Pass API key for premium TURN servers
+        onOpen: () => {
+          const proText = proStatus.isPro ? ' [PRO]' : '';
+          ui.setStatus(`connected on "${name}"${proText}. Showing last message from each sender.`);
+        },
+        onMessage: (text) => {
+          // Render file payloads nicely if received as JSON
+          try {
+            const obj = JSON.parse(text);
+            if (obj && obj.type === 'file' && typeof obj.name === 'string' && typeof obj.url === 'string') {
+              const sizeStr = typeof obj.size === 'number' ? ` · ${(obj.size / (1024 * 1024)).toFixed(1)}MB` : '';
+              ui.showRemote('peer', `📎 ${obj.name}${sizeStr} → ${obj.url}`);
+              // Store last received file URL for /copy command
+              (global as any).lastFileUrl = obj.url;
+              (global as any).lastFileName = obj.name;
+              return;
+            }
+          } catch { }
+          ui.showRemote('peer', text);
+        },
+        onStatus: (text) => ui.setStatus(text),
+        onClose: () => ui.setStatus('disconnected. press Ctrl+C to exit'),
+        onIce: (state) => ui.setIceState(state),
+        onTickInactivity: (ms) => ui.resetInactivity(ms),
+        onStats: (s) => {
+          const fpShort = s.remoteFingerprint || s.localFingerprint || undefined;
+          ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: fpShort });
+        },
+        onReaction: (emoji) => ui.showReaction(emoji)
+      });
+    }
 
     // --- File picker and upload helpers ---
     function parseDroppedPath(input: string): string | null {
@@ -384,7 +389,7 @@ Waiting for peer…`
         if (!putRes.ok) { ui.setStatus(`upload failed: ${putRes.status}`); return; }
 
         const payload = { type: 'file', name: filename, size: st.size, url: info.getUrl };
-        const sent = peer.send(JSON.stringify(payload));
+        const sent = peer?.send(JSON.stringify(payload)) || false;
         if (sent) {
           ui.showLocal('you', `📎 ${filename} · ${(st.size / 1024 / 1024).toFixed(1)}MB → ${info.getUrl}`);
           ui.setStatus('file sent');
@@ -406,14 +411,14 @@ Waiting for peer…`
         ui.setStatus(`theme set to ${t}`);
         return;
       }
-      if (line.trim() === 'r' && role === 'joiner') {
+      if (line.trim() === 'r' && role === 'joiner' && peer) {
         (peer as any)['ws'].send(JSON.stringify({ type: 'join', name }));
         const proText = proStatus.isPro ? ' [PRO]' : '';
         ui.setStatus(`retrying to join "${name}"${proText} …`);
         return;
       }
       if (line.startsWith('/fp')) {
-        const snap = (peer as any).getStatsSnapshot?.();
+        const snap = peer ? (peer as any).getStatsSnapshot?.() : null;
         if (!snap) { ui.setStatus('no stats yet'); return; }
         if (line.trim() === '/fpkey') {
           const fullLocal = snap.localFingerprint || '—';
@@ -429,7 +434,7 @@ Waiting for peer…`
         if (!proStatus.isPro) { ui.setStatus('This is a Pro feature. Upgrade: npx tunnel-chat upgrade'); return; }
         const emoji = line.replace('/react', '').trim();
         if (!emoji) { ui.setStatus('usage: /react :emoji:'); return; }
-        const okSend = (peer as any)?.send?.(JSON.stringify({ type: 'reaction', emoji }));
+        const okSend = peer ? (peer as any)?.send?.(JSON.stringify({ type: 'reaction', emoji })) : false;
         if (!okSend) ui.setStatus('channel not open yet…');
         else ui.showReaction(emoji);
         return;
@@ -497,26 +502,38 @@ Upgrade: npx tunnel-chat upgrade`);
         await uploadAndSend(dropped);
         return;
       }
-      const ok = peer.send(line);
-      if (!ok) ui.setStatus('channel not open yet…');
-      else {
-        ui.showLocal('you', line);
+      // Handle message sending for both regular peer and multi-peer creator
+      let messageSent = false;
 
-        // If this is a multi-peer creator, broadcast to all connected peers
-        if (role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1 && multiPeerWs) {
-          const multiPeers = (multiPeerWs as any).__multiPeers;
-          if (multiPeers) {
-            for (const [peerId, peerData] of multiPeers) {
-              if (peerData.dc && peerData.dc.readyState === 'open') {
-                try {
-                  peerData.dc.send(line);
-                } catch (error) {
-                  ui.setStatus(`failed to send to peer ${peerId}: ${error}`);
-                }
+      if (peer) {
+        // Regular peer connection
+        const ok = peer.send(line);
+        if (ok) messageSent = true;
+      }
+
+      // Multi-peer creator: broadcast to all connected peers
+      if (role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1 && multiPeerWs) {
+        const multiPeers = (multiPeerWs as any).__multiPeers;
+        if (multiPeers && multiPeers.size > 0) {
+          let sentToAnyPeer = false;
+          for (const [peerId, peerData] of multiPeers) {
+            if (peerData.dc && peerData.dc.readyState === 'open') {
+              try {
+                peerData.dc.send(line);
+                sentToAnyPeer = true;
+              } catch (error) {
+                ui.setStatus(`failed to send to peer ${peerId}: ${error}`);
               }
             }
           }
+          if (sentToAnyPeer) messageSent = true;
         }
+      }
+
+      if (!messageSent) {
+        ui.setStatus('no connections available to send message');
+      } else {
+        ui.showLocal('you', line);
       }
     }
 

@@ -94,6 +94,7 @@ type RoomRecord = {
     // multi-peer fields
     multi?: boolean;
     joiners?: Map<string, WebSocket>; // peerId -> joiner socket
+    maxPeers?: number; // maximum number of peers allowed in multi-peer room
 };
 
 const rooms = new Map<string, RoomRecord>();
@@ -1313,7 +1314,7 @@ wss.on('connection', (ws) => {
 
         // CREATE multi-peer room (Pro gated by API key)
         if (type === 'create_multi') {
-            const { name, key } = msg;
+            const { name, key, maxPeers } = msg;
             if (!name || !key) { ws.send(JSON.stringify({ type: 'error', error: 'missing_fields' })); return; }
             if (!hasKey(key)) { ws.send(JSON.stringify({ type: 'error', error: 'pro_required' })); return; }
             if (rooms.has(name)) { ws.send(JSON.stringify({ type: 'error', error: 'room_exists' })); return; }
@@ -1327,6 +1328,7 @@ wss.on('connection', (ws) => {
                 candidatesToCreator: [],
                 multi: true,
                 joiners: new Map(),
+                maxPeers: maxPeers || 10, // Default to 10 if not specified
             });
             try { ws.send(JSON.stringify({ type: 'created', name, multi: true })); } catch { }
             return;
@@ -1339,6 +1341,12 @@ wss.on('connection', (ws) => {
             const rec = rooms.get(name);
             if (rec) {
                 if (rec.multi) {
+                    // Check if room is at capacity
+                    if (rec.joiners!.size >= rec.maxPeers!) {
+                        ws.send(JSON.stringify({ type: 'error', error: 'room_full' }));
+                        return;
+                    }
+
                     // Assign a peerId and notify creator
                     const peerId = crypto.randomBytes(6).toString('hex');
                     (ws as any).__roomName = name;
