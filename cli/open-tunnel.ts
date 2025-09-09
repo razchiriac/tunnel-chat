@@ -9,8 +9,9 @@ import { TunnelPeer } from './peer.js';
 import { createUI } from './ui.js';
 const exec = promisify(execCb);
 
-// Import RTCPeerConnection for multi-peer support
-const { RTCPeerConnection } = require('wrtc');
+// Import RTCPeerConnection for multi-peer support  
+import wrtc from '@roamhq/wrtc';
+const { RTCPeerConnection } = (wrtc as any);
 
 const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 const DEFAULT_BILLING_SERVER = process.env.BILLING_SERVER ?? 'https://ditch.chat';
