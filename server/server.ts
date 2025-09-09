@@ -225,8 +225,8 @@ const server = http.createServer(async (req, res) => {
                 <div class="space-y-6">
                     <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
                         <h3 class="text-lg font-semibold mb-3 text-gray-200">Set environment variable:</h3>
-                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group">
-                            <code class="text-green-400">export TUNNEL_API_KEY="${key}"</code>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group overflow-hidden">
+                            <code class="text-green-400 block break-all whitespace-pre-wrap overflow-wrap-anywhere">export TUNNEL_API_KEY="${key}"</code>
                             <button onclick="copyExportCommand('${key}')" 
                                     class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
                                 Copy
@@ -236,8 +236,8 @@ const server = http.createServer(async (req, res) => {
 
                     <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
                         <h3 class="text-lg font-semibold mb-3 text-gray-200">Your API Key:</h3>
-                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group break-all">
-                            <code class="text-blue-400">${key}</code>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group overflow-hidden">
+                            <code class="text-blue-400 block break-all whitespace-pre-wrap overflow-wrap-anywhere">${key}</code>
                             <button onclick="copyApiKey('${key}')" 
                                     class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
                                 Copy
