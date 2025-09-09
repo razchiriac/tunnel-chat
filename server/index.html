@@ -369,6 +369,22 @@
             });
         }
 
+        function copyUpgradeCommandFromPro() {
+            const button = event.target;
+            navigator.clipboard.writeText('npx tunnel-chat@latest upgrade').then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            });
+        }
+
         function scrollToDemo() {
             document.getElementById('demo').scrollIntoView({ behavior: 'smooth' });
         }

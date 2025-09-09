@@ -157,34 +157,182 @@ const server = http.createServer(async (req, res) => {
 
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       const hasKey = Boolean(key);
-      res.end(`<!doctype html>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tunnel Chat – Your Key</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:2rem;line-height:1.5;color:#111}
-  .box{max-width:720px;margin:auto;border:1px solid #e5e7eb;border-radius:12px;padding:24px}
-  code{background:#f3f4f6;padding:6px 8px;border-radius:6px}
-  .muted{color:#6b7280}
-  button{padding:10px 14px;border-radius:8px;border:1px solid #111;background:#111;color:#fff;cursor:pointer}
-  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-</style>
-<div class="box">
-  <h1>${hasKey ? 'Your Pro API Key' : 'No Key Found'}</h1>
-  ${email ? `<p class="muted">For: <strong>${email}</strong></p>` : '<p class="muted">This link is invalid or expired.</p>'}
-  ${hasKey ? `
-    <p>Set it in your shell:</p>
-    <pre><code>export TUNNEL_API_KEY="${key}"</code></pre>
-    <div class="row">
-      <button onclick="navigator.clipboard.writeText('export TUNNEL_API_KEY=${key}');this.textContent='Copied!';">Copy export command</button>
-      <code>${key}</code>
+      res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Your API Key</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a'
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out',
+                        'slide-up': 'slideUp 0.5s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(30px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <!-- Header with Logo -->
+            <div class="text-center mb-8">
+                <div class="flex items-center justify-center space-x-2 mb-4">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-2 ${hasKey ? 'text-green-400' : 'text-red-400'}">${hasKey ? 'Your Pro API Key' : 'No Key Found'}</h1>
+                ${email ? `<p class="text-gray-300">For: <strong class="text-blue-400">${email}</strong></p>` : '<p class="text-gray-300">This link is invalid or expired.</p>'}
+            </div>
+
+            ${hasKey ? `
+                <!-- Success State -->
+                <div class="space-y-6">
+                    <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-200">Set environment variable:</h3>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group">
+                            <code class="text-green-400">export TUNNEL_API_KEY="${key}"</code>
+                            <button onclick="copyExportCommand('${key}')" 
+                                    class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-200">Your API Key:</h3>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group break-all">
+                            <code class="text-blue-400">${key}</code>
+                            <button onclick="copyApiKey('${key}')" 
+                                    class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                                Copy
+                            </button>
+                        </div>
+                        <p class="text-gray-400 text-sm mt-3">⚠️ Keep this key secure and do not share it.</p>
+                    </div>
+
+                    <div class="text-center">
+                        <p class="text-gray-300 mb-4">Now you can start using Tunnel Chat Pro features!</p>
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                            <code class="text-purple-400">npx tunnel-chat@latest</code>
+                            <button onclick="copyStartCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ` : `
+                <!-- No Key State -->
+                <div class="text-center space-y-6">
+                    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
+                        <h3 class="text-lg font-semibold mb-3 text-red-400">No Active Subscription Found</h3>
+                        <p class="text-gray-300 mb-4">We couldn't find a paid subscription associated with this email.</p>
+                        <p class="text-gray-300 mb-6">If you recently paid, give it a minute and try again. Otherwise, upgrade to Pro:</p>
+                        
+                        <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                            <code class="text-blue-400">npx tunnel-chat@latest upgrade</code>
+                            <button onclick="copyUpgradeCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `}
+
+            <div class="text-center mt-8">
+                <p class="text-gray-400 text-sm">This page is safe to close.</p>
+            </div>
+        </div>
     </div>
-  ` : `
-    <p>We couldn't find a paid subscription associated with this email.</p>
-    <p>If you recently paid, give it a minute and try again. Otherwise, run:</p>
-    <pre><code>npx tunnel-chat upgrade</code></pre>
-  `}
-  <p class="muted">This page is safe to close.</p>
-</div>`);
+
+    <script>
+        // Copy functionality with enhanced feedback
+        function copyToClipboard(text, button) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        function copyExportCommand(key) {
+            const button = event.target;
+            copyToClipboard(\`export TUNNEL_API_KEY="\${key}"\`, button);
+        }
+
+        function copyApiKey(key) {
+            const button = event.target;
+            copyToClipboard(key, button);
+        }
+
+        function copyStartCommand() {
+            const button = event.target;
+            copyToClipboard('npx tunnel-chat@latest', button);
+        }
+
+        function copyUpgradeCommand() {
+            const button = event.target;
+            copyToClipboard('npx tunnel-chat@latest upgrade', button);
+        }
+    </script>
+</body>
+</html>`);
       return;
     }
 

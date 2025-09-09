@@ -313,14 +313,116 @@ const server = http.createServer(async (req, res) => {
 
         if (!token) {
             res.writeHead(400, { 'content-type': 'text/html' });
-            res.end('<h1>Invalid Link</h1><p>Missing token parameter.</p>');
+            res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Invalid Link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <div class="text-center">
+                <div class="flex items-center justify-center space-x-2 mb-6">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-4 text-red-400">Invalid Link</h1>
+                <p class="text-gray-300 mb-6">Missing token parameter.</p>
+                <p class="text-gray-400 text-sm">Please check your email for the correct link.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`);
             return;
         }
 
         const email = consumeToken(token);
         if (!email) {
             res.writeHead(400, { 'content-type': 'text/html' });
-            res.end('<h1>Invalid or Expired Link</h1><p>This link is invalid or has already been used.</p>');
+            res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Invalid Link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <div class="text-center">
+                <div class="flex items-center justify-center space-x-2 mb-6">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-4 text-red-400">Invalid or Expired Link</h1>
+                <p class="text-gray-300 mb-6">This link is invalid or has already been used.</p>
+                <p class="text-gray-400 text-sm">Please request a new magic link from your terminal.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`);
             return;
         }
 
@@ -333,7 +435,85 @@ const server = http.createServer(async (req, res) => {
             if (customers.data.length === 0) {
                 console.log(`[auth] No customers found for email: ${email}`);
                 res.writeHead(404, { 'content-type': 'text/html' });
-                res.end('<h1>Account Not Found</h1><p>No account found for this email address.</p>');
+                res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Account Not Found</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <div class="text-center space-y-6">
+                <div class="flex items-center justify-center space-x-2 mb-6">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
+                    <h1 class="text-3xl font-bold mb-4 text-red-400">Account Not Found</h1>
+                    <p class="text-gray-300 mb-6">No account found for this email address.</p>
+                    <p class="text-gray-300 mb-6">To get started with Tunnel Chat Pro, run:</p>
+                    
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                        <code class="text-blue-400">npx tunnel-chat@latest upgrade</code>
+                        <button onclick="copyUpgradeCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function copyUpgradeCommand() {
+            const button = event.target;
+            navigator.clipboard.writeText('npx tunnel-chat@latest upgrade').then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>`);
                 return;
             }
 
@@ -344,16 +524,153 @@ const server = http.createServer(async (req, res) => {
                 const k = c.metadata?.ditch_api_key;
                 if (k && keys.includes(k)) {
                     res.writeHead(200, { 'content-type': 'text/html' });
-                    res.end(`
-                    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px">
-                        <h1>Your API Key</h1>
-                        <p>Copy this key and set it as an environment variable:</p>
-                        <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">${k}</pre>
-                        <p><strong>Example:</strong></p>
-                        <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">export TUNNEL_API_KEY="${k}"</pre>
-                        <p style="color:#666;font-size:14px">Keep this key secure and do not share it.</p>
+                    res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Your API Key</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a'
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <!-- Header with Logo -->
+            <div class="text-center mb-8">
+                <div class="flex items-center justify-center space-x-2 mb-4">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
                     </div>
-                    `);
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-2 text-green-400">Your Pro API Key</h1>
+            </div>
+
+            <!-- Success State -->
+            <div class="space-y-6">
+                <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-200">Set environment variable:</h3>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group">
+                        <code class="text-green-400">export TUNNEL_API_KEY="${k}"</code>
+                        <button onclick="copyExportCommand('${k}')" 
+                                class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-200">Your API Key:</h3>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group break-all">
+                        <code class="text-blue-400">${k}</code>
+                        <button onclick="copyApiKey('${k}')" 
+                                class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                            Copy
+                        </button>
+                    </div>
+                    <p class="text-gray-400 text-sm mt-3">⚠️ Keep this key secure and do not share it.</p>
+                </div>
+
+                <div class="text-center">
+                    <p class="text-gray-300 mb-4">Now you can start using Tunnel Chat Pro features!</p>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                        <code class="text-purple-400">npx tunnel-chat@latest</code>
+                        <button onclick="copyStartCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center mt-8">
+                <p class="text-gray-400 text-sm">This page is safe to close.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Copy functionality with enhanced feedback
+        function copyToClipboard(text, button) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        function copyExportCommand(key) {
+            const button = event.target;
+            copyToClipboard(\`export TUNNEL_API_KEY="\${key}"\`, button);
+        }
+
+        function copyApiKey(key) {
+            const button = event.target;
+            copyToClipboard(key, button);
+        }
+
+        function copyStartCommand() {
+            const button = event.target;
+            copyToClipboard('npx tunnel-chat@latest', button);
+        }
+    </script>
+</body>
+</html>`);
                     return;
                 }
             }
@@ -374,16 +691,153 @@ const server = http.createServer(async (req, res) => {
                         const newKey = await provisionKeyForCustomer(c.id);
                         console.log(`[auth] Provisioned new key for customer ${c.id}: ${newKey}`);
                         res.writeHead(200, { 'content-type': 'text/html' });
-                        res.end(`
-                        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px">
-                            <h1>Your API Key</h1>
-                            <p>Copy this key and set it as an environment variable:</p>
-                            <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">${newKey}</pre>
-                            <p><strong>Example:</strong></p>
-                            <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">export TUNNEL_API_KEY="${newKey}"</pre>
-                            <p style="color:#666;font-size:14px">Keep this key secure and do not share it.</p>
+                        res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Your API Key</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a'
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <!-- Header with Logo -->
+            <div class="text-center mb-8">
+                <div class="flex items-center justify-center space-x-2 mb-4">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
                         </div>
-                        `);
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-2 text-green-400">Your Pro API Key</h1>
+            </div>
+
+            <!-- Success State -->
+            <div class="space-y-6">
+                <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-200">Set environment variable:</h3>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group">
+                        <code class="text-green-400">export TUNNEL_API_KEY="${newKey}"</code>
+                        <button onclick="copyExportCommand('${newKey}')" 
+                                class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-900/50 rounded-lg p-6 border border-gray-600">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-200">Your API Key:</h3>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm relative group break-all">
+                        <code class="text-blue-400">${newKey}</code>
+                        <button onclick="copyApiKey('${newKey}')" 
+                                class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors opacity-0 group-hover:opacity-100">
+                            Copy
+                        </button>
+                    </div>
+                    <p class="text-gray-400 text-sm mt-3">⚠️ Keep this key secure and do not share it.</p>
+                </div>
+
+                <div class="text-center">
+                    <p class="text-gray-300 mb-4">Now you can start using Tunnel Chat Pro features!</p>
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                        <code class="text-purple-400">npx tunnel-chat@latest</code>
+                        <button onclick="copyStartCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center mt-8">
+                <p class="text-gray-400 text-sm">This page is safe to close.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Copy functionality with enhanced feedback
+        function copyToClipboard(text, button) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        function copyExportCommand(key) {
+            const button = event.target;
+            copyToClipboard(\`export TUNNEL_API_KEY="\${key}"\`, button);
+        }
+
+        function copyApiKey(key) {
+            const button = event.target;
+            copyToClipboard(key, button);
+        }
+
+        function copyStartCommand() {
+            const button = event.target;
+            copyToClipboard('npx tunnel-chat@latest', button);
+        }
+    </script>
+</body>
+</html>`);
                         return;
                     } else {
                         console.log(`[auth] No active subscriptions found for customer ${c.id}`);
@@ -397,12 +851,141 @@ const server = http.createServer(async (req, res) => {
             }
 
             res.writeHead(404, { 'content-type': 'text/html' });
-            res.end('<h1>No Active Subscription</h1><p>No active subscription found for this email address.</p>');
+            res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – No Active Subscription</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <div class="text-center space-y-6">
+                <div class="flex items-center justify-center space-x-2 mb-6">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-6">
+                    <h1 class="text-3xl font-bold mb-4 text-yellow-400">No Active Subscription</h1>
+                    <p class="text-gray-300 mb-4">No active subscription found for this email address.</p>
+                    <p class="text-gray-300 mb-6">If you recently paid, give it a minute and try again. Otherwise, upgrade to Pro:</p>
+                    
+                    <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm inline-flex items-center gap-3">
+                        <code class="text-blue-400">npx tunnel-chat@latest upgrade</code>
+                        <button onclick="copyUpgradeCommand()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function copyUpgradeCommand() {
+            const button = event.target;
+            navigator.clipboard.writeText('npx tunnel-chat@latest upgrade').then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600', 'text-white');
+                button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600', 'text-white');
+                    button.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>`);
 
         } catch (e: any) {
             console.error('[auth] consume error:', e.message);
             res.writeHead(500, { 'content-type': 'text/html' });
-            res.end('<h1>Server Error</h1><p>An error occurred while processing your request.</p>');
+            res.end(`<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel Chat – Server Error</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-2xl w-full bg-gray-800/50 rounded-xl p-8 border border-gray-700 animate-fade-in">
+            <div class="text-center">
+                <div class="flex items-center justify-center space-x-2 mb-6">
+                    <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TC</span>
+                    </div>
+                    <span class="text-xl font-bold gradient-text">Tunnel Chat</span>
+                </div>
+                <h1 class="text-3xl font-bold mb-4 text-red-400">Server Error</h1>
+                <p class="text-gray-300 mb-6">An error occurred while processing your request.</p>
+                <p class="text-gray-400 text-sm">Please try again later or contact support if the issue persists.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`);
         }
         return;
     }
