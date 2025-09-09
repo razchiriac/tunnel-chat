@@ -9,6 +9,9 @@ import { TunnelPeer } from './peer.js';
 import { createUI } from './ui.js';
 const exec = promisify(execCb);
 
+// Import RTCPeerConnection for multi-peer support
+const { RTCPeerConnection } = require('wrtc');
+
 const DEFAULT_SIGNAL = process.env.TUNNEL_SIGNAL ?? 'wss://ditch.chat';
 const DEFAULT_BILLING_SERVER = process.env.BILLING_SERVER ?? 'https://ditch.chat';
 
@@ -137,41 +140,138 @@ Waiting for peer…`
       ui.setStatus(`joining "${name}"${proText} … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
     }
 
+    // Store multi-peer WebSocket for message broadcasting
+    let multiPeerWs: any = null;
+
     // If creator with --peers and Pro, create multi-peer room first
     if (role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1) {
       // Open a control WebSocket to send create_multi
       try {
         const ws = new (await import('ws')).WebSocket(opts.signal);
+        multiPeerWs = ws;
         ws.on('open', () => {
           ws.send(JSON.stringify({ type: 'create_multi', name, key: process.env.TUNNEL_API_KEY }));
           ui.setStatus(`multi-peer room created: "${name}" (up to ${opts.peers} peers)`);
         });
-        ws.on('message', (raw: any) => {
+        ws.on('message', async (raw: any) => {
           try {
             const msg = JSON.parse(raw.toString());
             if (msg.type === 'join_request' && typeof msg.peerId === 'string') {
-              // For simplicity, spin up a dedicated TunnelPeer for this joiner using same name; creator role
-              const child = new TunnelPeer({
-                name,
-                role: 'creator',
-                signalingURL: opts.signal,
-                apiKey: process.env.TUNNEL_API_KEY,
-                onOpen: () => ui.setStatus(`peer ${msg.peerId} connected`),
-                onMessage: (text) => ui.showRemote('peer', text),
-                onStatus: (t) => ui.setStatus(t),
-                onClose: () => ui.setStatus(`peer ${msg.peerId} disconnected`),
-                onIce: (s) => ui.setIceState(s),
-                onTickInactivity: (ms) => ui.resetInactivity(ms),
-                onStats: (s) => ui.setNetworkStats({ pathLabel: s.pathLabel, rttMs: s.rttMs, fingerprintShort: s.remoteFingerprint || s.localFingerprint })
+              // Create a dedicated peer connection for this joiner
+              // We'll handle the signaling manually through the control WebSocket
+              const pc = new RTCPeerConnection({
+                iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+                iceTransportPolicy: 'all',
+                iceCandidatePoolSize: 8,
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
               });
-              // Immediately send a per-peer offer via signaling with peerId
-              // We reuse the child's internal signaling flow by posting a custom offer message once localDescription is ready
-              const postOffer = async () => {
-                const offer = await (child as any)['pc'].createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
-                await (child as any)['pc'].setLocalDescription(offer);
-                (child as any).sendSignal({ type: 'offer', name, peerId: msg.peerId, sdp: (child as any)['pc'].localDescription?.sdp });
+
+              // Create data channel for this peer
+              const dc = pc.createDataChannel('tunnel');
+
+              // Handle peer connection state changes
+              pc.onconnectionstatechange = () => {
+                const state = pc.connectionState;
+                if (state === 'connected') {
+                  ui.setStatus(`peer ${msg.peerId} connected`);
+                } else if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+                  ui.setStatus(`peer ${msg.peerId} disconnected`);
+                  pc.close();
+                }
               };
-              postOffer().catch(() => { });
+
+              // Handle incoming messages from this peer
+              dc.onopen = () => {
+                ui.setStatus(`data channel open for peer ${msg.peerId}`);
+              };
+
+              dc.onmessage = (event: any) => {
+                const text = event.data;
+                // Handle file payloads nicely if received as JSON
+                try {
+                  const obj = JSON.parse(text);
+                  if (obj && obj.type === 'file' && typeof obj.name === 'string' && typeof obj.url === 'string') {
+                    const sizeStr = typeof obj.size === 'number' ? ` · ${(obj.size / (1024 * 1024)).toFixed(1)}MB` : '';
+                    ui.showRemote(`peer-${msg.peerId}`, `📎 ${obj.name}${sizeStr} → ${obj.url}`);
+                    // Store last received file URL for /copy command
+                    (global as any).lastFileUrl = obj.url;
+                    (global as any).lastFileName = obj.name;
+                    return;
+                  }
+                } catch { }
+                ui.showRemote(`peer-${msg.peerId}`, text);
+              };
+
+              // Handle ICE candidates for this peer
+              pc.onicecandidate = (event: any) => {
+                if (event.candidate) {
+                  ws.send(JSON.stringify({
+                    type: 'candidate',
+                    name,
+                    peerId: msg.peerId,
+                    candidate: event.candidate.candidate,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex
+                  }));
+                }
+              };
+
+              // Store peer connection for message forwarding
+              const peerData = { pc, dc, peerId: msg.peerId };
+              if (!(ws as any).__multiPeers) (ws as any).__multiPeers = new Map();
+              (ws as any).__multiPeers.set(msg.peerId, peerData);
+
+              // Create and send offer for this specific peer
+              const createOffer = async () => {
+                try {
+                  const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+                  await pc.setLocalDescription(offer);
+
+                  // Send offer through control WebSocket with peerId
+                  ws.send(JSON.stringify({
+                    type: 'offer',
+                    name,
+                    peerId: msg.peerId,
+                    sdp: pc.localDescription?.sdp
+                  }));
+                } catch (error) {
+                  ui.setStatus(`failed to create offer for peer ${msg.peerId}: ${error}`);
+                }
+              };
+
+              createOffer();
+            }
+
+            // Handle answer messages from joiners
+            if (msg.type === 'answer' && typeof msg.peerId === 'string') {
+              const multiPeers = (ws as any).__multiPeers;
+              if (multiPeers && multiPeers.has(msg.peerId)) {
+                const peerData = multiPeers.get(msg.peerId);
+                try {
+                  await peerData.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+                  ui.setStatus(`received answer from peer ${msg.peerId}`);
+                } catch (error) {
+                  ui.setStatus(`failed to set remote description for peer ${msg.peerId}: ${error}`);
+                }
+              }
+            }
+
+            // Handle ICE candidates from joiners
+            if (msg.type === 'candidate' && typeof msg.peerId === 'string' && msg.candidate) {
+              const multiPeers = (ws as any).__multiPeers;
+              if (multiPeers && multiPeers.has(msg.peerId)) {
+                const peerData = multiPeers.get(msg.peerId);
+                try {
+                  await peerData.pc.addIceCandidate({
+                    candidate: msg.candidate,
+                    sdpMid: msg.sdpMid ?? null,
+                    sdpMLineIndex: msg.sdpMLineIndex ?? null,
+                  });
+                } catch (error) {
+                  ui.setStatus(`addIceCandidate failed for peer ${msg.peerId}: ${error}`);
+                }
+              }
             }
           } catch { }
         });
@@ -398,7 +498,25 @@ Upgrade: npx tunnel-chat upgrade`);
       }
       const ok = peer.send(line);
       if (!ok) ui.setStatus('channel not open yet…');
-      else ui.showLocal('you', line);
+      else {
+        ui.showLocal('you', line);
+
+        // If this is a multi-peer creator, broadcast to all connected peers
+        if (role === 'creator' && proStatus.isPro && opts.peers && opts.peers > 1 && multiPeerWs) {
+          const multiPeers = (multiPeerWs as any).__multiPeers;
+          if (multiPeers) {
+            for (const [peerId, peerData] of multiPeers) {
+              if (peerData.dc && peerData.dc.readyState === 'open') {
+                try {
+                  peerData.dc.send(line);
+                } catch (error) {
+                  ui.setStatus(`failed to send to peer ${peerId}: ${error}`);
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     ui.promptInput((line) => { void handleInput(line); });
