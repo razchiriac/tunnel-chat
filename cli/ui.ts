@@ -236,9 +236,9 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     const roleStr = `${C.dim}role:${C.reset} ${role === 'creator' ? theme.creator + 'creator' : theme.joiner + 'joiner'}${C.reset}`;
 
     const share = `${C.dim}share:${C.reset} npx tunnel-chat@latest ${tunnelName}`;
-    const countdown = `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
+    const countdown = `${C.dim}${fmtCountdown(inactivityRemainingMs)}${C.reset}`;
 
-    moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
+    moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
     moveTo(2, 2); process.stdout.write(padRight(`${C.fg.blue}${share}${C.reset}`, totalW - 4));
 
     // Single conversation pane with messenger-style layout
