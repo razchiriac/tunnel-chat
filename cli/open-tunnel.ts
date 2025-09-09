@@ -130,15 +130,10 @@ Get Pro access:
 
     if (role === 'creator') {
       const proText = proStatus.isPro ? ' [PRO]' : '';
-      ui.setStatus(
-        `tunnel: ${name} (creator)${proText}.
-share: npx tunnel-chat@latest ${name}
-using signaling: ${opts.signal}
-Waiting for peer…`
-      );
+      ui.setStatus(`waiting for peer…${proText}`);
     } else {
       const proText = proStatus.isPro ? ' [PRO]' : '';
-      ui.setStatus(`joining "${name}"${proText} … using signaling: ${opts.signal}. Press 'r' then Enter to retry.`);
+      ui.setStatus(`joining …  Press 'r' then Enter to retry.${proText}`);
     }
 
     // Store multi-peer WebSocket for message broadcasting
@@ -293,7 +288,7 @@ Waiting for peer…`
         apiKey: proStatus.isPro ? process.env.TUNNEL_API_KEY : undefined, // Pass API key for premium TURN servers
         onOpen: () => {
           const proText = proStatus.isPro ? ' [PRO]' : '';
-          ui.setStatus(`connected on "${name}"${proText}. Showing last message from each sender.`);
+          ui.setStatus(`connected${proText}`);
         },
         onMessage: (text) => {
           // Render file payloads nicely if received as JSON
@@ -414,7 +409,7 @@ Waiting for peer…`
       if (line.trim() === 'r' && role === 'joiner' && peer) {
         (peer as any)['ws'].send(JSON.stringify({ type: 'join', name }));
         const proText = proStatus.isPro ? ' [PRO]' : '';
-        ui.setStatus(`retrying to join "${name}"${proText} …`);
+        ui.setStatus(`retrying connection${proText} …`);
         return;
       }
       if (line.startsWith('/fp')) {

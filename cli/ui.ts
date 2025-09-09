@@ -234,11 +234,12 @@ export function createUI(tunnelName: string, role: 'creator' | 'joiner', isPro: 
     const brand = `${C.bold}${theme.brand}ditch.chat${C.reset}`;
     const tunnel = `${C.dim}tunnel:${C.reset} ${theme.tunnel}${tunnelName}${C.reset}`;
     const roleStr = `${C.dim}role:${C.reset} ${role === 'creator' ? theme.creator + 'creator' : theme.joiner + 'joiner'}${C.reset}`;
-    const countdown = `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
-    moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${countdown}`, totalW - 4));
+    // Show share command for creators, countdown for others
+    const shareOrCountdown = role === 'creator'
+      ? `${C.dim}share:${C.reset} npx tunnel-chat@latest ${tunnelName}`
+      : `${C.dim}auto-close in:${C.reset} ${fmtCountdown(inactivityRemainingMs)}`;
+    moveTo(2, 1); process.stdout.write(padRight(`${brand}   ${tunnel}   ${roleStr}   ${ind.dot} ${ind.label}   ${shareOrCountdown}`, totalW - 4));
     moveTo(2, 2); process.stdout.write(padRight(`${C.dim}status:${C.reset} ${status}`, totalW - 4));
-    const net = `${C.dim}path:${C.reset} ${isPro ? netPath : '—'}   ${C.dim}RTT:${C.reset} ${netRtt}`;
-    moveTo(2, 3); process.stdout.write(padRight(net, totalW - 4));
 
     // Single conversation pane with messenger-style layout
     const conversationH = contentH;
