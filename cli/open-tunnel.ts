@@ -113,7 +113,7 @@ Environment variables:
 
 Get Pro access:
   npx tunnel-chat upgrade           # Start payment process
-  npx tunnel-chat auth <email>      # Retrieve API key after payment`)
+  npx tunnel-chat auth <email>      # Email a one-time link to reveal your key`)
   .action(async (nameArg: string | undefined, opts: { signal: string; peers?: number; theme?: string }) => {
     const name = nameArg || autoName();
     const role: 'creator' | 'joiner' = nameArg ? 'joiner' : 'creator';
@@ -436,8 +436,8 @@ program
       console.log('');
       console.log(`   ${data.url}`);
       console.log('');
-      console.log('After payment, use: npx tunnel-chat auth <your-email>');
-      console.log('to retrieve your API key.');
+      console.log('After payment, run: npx tunnel-chat auth <your-email>');
+      console.log('We\'ll email you a single-use link to reveal your key.');
 
     } catch (error) {
       console.error('❌ Upgrade failed:', (error as Error).message);
@@ -448,44 +448,38 @@ program
 // Add auth command  
 program
   .command('auth')
-  .description('Retrieve your API key using your email')
+  .description('Email a one-time link to reveal your API key')
   .argument('<email>', 'email address used for payment')
   .option('--server <url>', 'billing server url', DEFAULT_BILLING_SERVER)
   .action(async (email: string, opts: { server: string }) => {
     try {
-      console.log(`🔑 Retrieving API key for ${email}...`);
+      const clean = (email || '').trim().toLowerCase();
+      if (!clean || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) {
+        console.error('❌ Please provide a valid email address.');
+        process.exit(1);
+      }
 
-      // Call the billing server to get the key by email
-      const response = await fetch(`${opts.server}/auth/key?email=${encodeURIComponent(email)}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      console.log(`📬 Sending a one-time sign-in link to ${clean}...`);
+
+      const resp = await fetch(`${opts.server}/auth/key/request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: clean }),
       });
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        if (response.status === 404) {
-          throw new Error('No API key found for this email. Make sure you completed the payment process.');
-        }
-        throw new Error(`Failed to retrieve API key: ${error.error || response.statusText}`);
+      // The server responds generically regardless of account status to avoid enumeration.
+      if (!resp.ok) {
+        console.error('❌ Request failed. Please try again in a few minutes.');
+        process.exit(1);
       }
 
-      const data = await response.json();
-
-      if (!data.key) {
-        throw new Error('No API key received from server');
-      }
-
-      console.log('✅ API key retrieved successfully!');
+      console.log('✅ If an account exists, you\'ll receive an email in a moment.');
+      console.log('   The link is single-use and expires shortly.');
       console.log('');
-      console.log(`   ${data.key}`);
-      console.log('');
-      console.log('💡 Save this key securely. You can set it as an environment variable:');
-      console.log(`   export TUNNEL_API_KEY="${data.key}"`);
-
-    } catch (error) {
-      console.error('❌ Auth failed:', (error as Error).message);
+      console.log('After revealing your key, set it like:');
+      console.log('   export TUNNEL_API_KEY="sk_..."');
+    } catch (e: any) {
+      console.error('❌ Auth request failed:', e?.message || e);
       process.exit(1);
     }
   });
