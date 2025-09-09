@@ -326,9 +326,12 @@ const server = http.createServer(async (req, res) => {
 
         try {
             // Search for customers by email in Stripe
+            console.log(`[auth] Looking for customers with email: ${email}`);
             const customers = await stripe.customers.list({ email, limit: 100 });
+            console.log(`[auth] Found ${customers.data.length} customers`);
 
             if (customers.data.length === 0) {
+                console.log(`[auth] No customers found for email: ${email}`);
                 res.writeHead(404, { 'content-type': 'text/html' });
                 res.end('<h1>Account Not Found</h1><p>No account found for this email address.</p>');
                 return;
@@ -358,9 +361,15 @@ const server = http.createServer(async (req, res) => {
             // Try to retro-provision for active subscriber
             for (const c of customers.data) {
                 try {
+                    console.log(`[auth] Checking subscriptions for customer ${c.id} (email: ${c.email})`);
                     const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    console.log(`[auth] Found ${subs.data.length} active subscriptions for customer ${c.id}`);
+
                     if (subs.data.length > 0) {
+                        const sub = subs.data[0];
+                        console.log(`[auth] Active subscription found: ${sub.id}, status: ${sub.status}`);
                         const newKey = await provisionKeyForCustomer(c.id);
+                        console.log(`[auth] Provisioned new key for customer ${c.id}: ${newKey}`);
                         res.writeHead(200, { 'content-type': 'text/html' });
                         res.end(`
                         <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px">
@@ -373,6 +382,11 @@ const server = http.createServer(async (req, res) => {
                         </div>
                         `);
                         return;
+                    } else {
+                        console.log(`[auth] No active subscriptions found for customer ${c.id}`);
+                        // Let's also check for other subscription statuses
+                        const allSubs = await stripe.subscriptions.list({ customer: c.id, limit: 10 });
+                        console.log(`[auth] All subscriptions for customer ${c.id}:`, allSubs.data.map(s => ({ id: s.id, status: s.status })));
                     }
                 } catch (e: any) {
                     console.error('[auth] subscription check failed during consume:', e.message);
