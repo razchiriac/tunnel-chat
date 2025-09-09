@@ -20,8 +20,66 @@ const PRICE_ID = process.env.STRIPE_PRICE_ID || '';
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const KEYS_PATH = process.env.KEYS_PATH ?? path.join(process.cwd(), 'server', 'keys.json');
 
+// Email magic-link auth configuration for CLI `npx tunnel-chat auth <email>`
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://ditch.chat';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const RESEND_FROM = process.env.RESEND_FROM || 'no-reply@ditch.chat';
+
 // Initialize Stripe
 const stripe = new Stripe(STRIPE_SECRET, {});
+
+// Magic token management for email auth
+type Magic = { email: string; exp: number };
+const magicTokens = new Map<string, Magic>();
+
+// Helper functions for magic token auth
+function createToken(email: string, ttlSec = 900): string {
+    const token = crypto.randomBytes(24).toString('base64url');
+    magicTokens.set(token, { email, exp: Date.now() + ttlSec * 1000 });
+    return token;
+}
+
+function consumeToken(token: string): string | null {
+    const rec = magicTokens.get(token);
+    if (!rec) return null;
+    magicTokens.delete(token); // single use
+    if (Date.now() > rec.exp) return null;
+    return rec.email;
+}
+
+// Clean up expired tokens every minute
+setInterval(() => {
+    const t = Date.now();
+    for (const [tok, m] of magicTokens) if (t > m.exp) magicTokens.delete(tok);
+}, 60_000);
+
+// Send magic link email using Resend API
+async function sendMagicEmail(to: string, url: string): Promise<void> {
+    if (!RESEND_API_KEY) {
+        console.log(`[auth] RESEND_API_KEY not set. Magic link for ${to}: ${url}`);
+        return;
+    }
+    const subject = 'Your Tunnel Chat sign-in link';
+    const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.45">
+        <h2>Sign in to Tunnel Chat</h2>
+        <p>Click the button below to reveal your Pro API key.</p>
+        <p style="margin:24px 0">
+            <a href="${url}" style="background:#111;color:#fff;padding:12px 16px;border-radius:6px;text-decoration:none">Reveal my key</a>
+        </p>
+        <p style="color:#666;font-size:12px">This link is single-use and expires in 15 minutes.</p>
+    </div>`;
+    const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${RESEND_API_KEY}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ from: RESEND_FROM, to, subject, html })
+    });
+    if (!resp.ok) {
+        console.error('[auth] Resend send failed:', resp.status, await resp.text());
+    } else {
+        console.log(`[auth] Magic link emailed to ${to}`);
+    }
+}
 
 // Signaling server types and state
 type RoomRecord = {
@@ -222,6 +280,32 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // POST /auth/key/request - Send magic link email for CLI authentication
+    if (req.method === 'POST' && req.url === '/auth/key/request') {
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', async () => {
+            // Always reply 200 to avoid email enumeration
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+
+            try {
+                const { email } = JSON.parse(body || '{}');
+                const clean = (email || '').toString().trim().toLowerCase();
+                if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) {
+                    console.log('[auth] invalid email');
+                    return;
+                }
+                const token = createToken(clean, 15 * 60); // 15 minutes
+                const revealUrl = `${PUBLIC_BASE_URL}/auth/key/consume?token=${encodeURIComponent(token)}`;
+                await sendMagicEmail(clean, revealUrl);
+            } catch (e) {
+                console.error('[auth] request handler error:', e);
+            }
+        });
+        return;
+    }
+
     // Auth endpoint: retrieve key by email
     if (req.method === 'GET' && req.url?.startsWith('/auth/key')) {
         const url = new URL(req.url, `http://${req.headers.host}`);
@@ -281,6 +365,90 @@ const server = http.createServer(async (req, res) => {
             console.error('[billing] auth/key error:', e.message);
             return json(res, 500, { error: e.message || 'server_error' });
         }
+    }
+
+    // GET /auth/key/consume?token=... - Handle magic link consumption
+    if (req.method === 'GET' && req.url?.startsWith('/auth/key/consume')) {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const token = url.searchParams.get('token');
+
+        if (!token) {
+            res.writeHead(400, { 'content-type': 'text/html' });
+            res.end('<h1>Invalid Link</h1><p>Missing token parameter.</p>');
+            return;
+        }
+
+        const email = consumeToken(token);
+        if (!email) {
+            res.writeHead(400, { 'content-type': 'text/html' });
+            res.end('<h1>Invalid or Expired Link</h1><p>This link is invalid or has already been used.</p>');
+            return;
+        }
+
+        try {
+            // Search for customers by email in Stripe
+            const customers = await stripe.customers.list({ email, limit: 100 });
+
+            if (customers.data.length === 0) {
+                res.writeHead(404, { 'content-type': 'text/html' });
+                res.end('<h1>Account Not Found</h1><p>No account found for this email address.</p>');
+                return;
+            }
+
+            const keys = loadKeys();
+
+            // Find existing key
+            for (const c of customers.data) {
+                const k = c.metadata?.ditch_api_key;
+                if (k && keys.includes(k)) {
+                    res.writeHead(200, { 'content-type': 'text/html' });
+                    res.end(`
+                    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px">
+                        <h1>Your API Key</h1>
+                        <p>Copy this key and set it as an environment variable:</p>
+                        <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">${k}</pre>
+                        <p><strong>Example:</strong></p>
+                        <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">export TUNNEL_API_KEY="${k}"</pre>
+                        <p style="color:#666;font-size:14px">Keep this key secure and do not share it.</p>
+                    </div>
+                    `);
+                    return;
+                }
+            }
+
+            // Try to retro-provision for active subscriber
+            for (const c of customers.data) {
+                try {
+                    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    if (subs.data.length > 0) {
+                        const newKey = await provisionKeyForCustomer(c.id);
+                        res.writeHead(200, { 'content-type': 'text/html' });
+                        res.end(`
+                        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px">
+                            <h1>Your API Key</h1>
+                            <p>Copy this key and set it as an environment variable:</p>
+                            <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">${newKey}</pre>
+                            <p><strong>Example:</strong></p>
+                            <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto">export TUNNEL_API_KEY="${newKey}"</pre>
+                            <p style="color:#666;font-size:14px">Keep this key secure and do not share it.</p>
+                        </div>
+                        `);
+                        return;
+                    }
+                } catch (e: any) {
+                    console.error('[auth] subscription check failed during consume:', e.message);
+                }
+            }
+
+            res.writeHead(404, { 'content-type': 'text/html' });
+            res.end('<h1>No Active Subscription</h1><p>No active subscription found for this email address.</p>');
+
+        } catch (e: any) {
+            console.error('[auth] consume error:', e.message);
+            res.writeHead(500, { 'content-type': 'text/html' });
+            res.end('<h1>Server Error</h1><p>An error occurred while processing your request.</p>');
+        }
+        return;
     }
 
     // TURN auth endpoint
@@ -658,5 +826,5 @@ server.listen(PORT, () => {
     console.log(`[signaling] TTL=${TTL_MS / 1000}s JOIN_WAIT=${JOIN_WAIT_MS / 1000}s TURN_REALM=${TURN_REALM}`);
     console.log(`[billing] STRIPE_WEBHOOK_SECRET set? ${WEBHOOK_SECRET ? 'yes' : 'NO'}`);
     console.log(`[billing] KEYS_PATH ${path.resolve(KEYS_PATH)}`);
-    console.log(`[combined] endpoints: GET /, GET /success, GET /cancel, POST /create-checkout-session, POST /webhook, GET /auth/key, GET /auth/turn, WebSocket signaling`);
+    console.log(`[combined] endpoints: GET /, GET /success, GET /cancel, POST /create-checkout-session, POST /webhook, POST /auth/key/request, GET /auth/key/consume, GET /auth/key, GET /auth/turn, WebSocket signaling`);
 });
