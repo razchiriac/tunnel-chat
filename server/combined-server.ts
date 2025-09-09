@@ -306,68 +306,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Auth endpoint: retrieve key by email
-    if (req.method === 'GET' && req.url?.startsWith('/auth/key')) {
-        const url = new URL(req.url, `http://${req.headers.host}`);
-        const email = url.searchParams.get('email');
-
-        if (!email) {
-            return json(res, 400, { error: 'email parameter required' });
-        }
-
-        try {
-            // Search for ALL customers by email in Stripe (can be multiple)
-            const customers = await stripe.customers.list({ email, limit: 100 });
-
-            if (customers.data.length === 0) {
-                return json(res, 404, { error: 'no_customer_found' });
-            }
-
-            const keys = loadKeys();
-
-            // Pass 1: return first valid existing key across customers
-            for (const c of customers.data) {
-                const k = c.metadata?.ditch_api_key;
-                if (k && keys.includes(k)) {
-                    console.log('[billing] API key retrieved for email (multi-customer match):', email);
-                    return json(res, 200, { key: k });
-                }
-            }
-
-            // Pass 2: retro-provision for first customer with active subscription
-            for (const c of customers.data) {
-                try {
-                    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
-                    if (subs.data.length > 0) {
-                        const k = c.metadata?.ditch_api_key;
-                        if (!k || !keys.includes(k)) {
-                            console.log('[billing] retro-provisioning API key for active subscriber (multi-customer)');
-                            const newKey = await provisionKeyForCustomer(c.id);
-                            return json(res, 200, { key: newKey });
-                        }
-                    }
-                } catch (e: any) {
-                    console.error('[billing] subscription check failed during retro-provision (multi-customer):', e.message);
-                }
-            }
-
-            // Optional: clean stale metadata keys that are no longer in store (best-effort)
-            for (const c of customers.data) {
-                const k = c.metadata?.ditch_api_key;
-                if (k && !keys.includes(k)) {
-                    try { await stripe.customers.update(c.id, { metadata: { ...c.metadata, ditch_api_key: '' } }); } catch { }
-                }
-            }
-
-            return json(res, 404, { error: 'no_api_key_found' });
-
-        } catch (e: any) {
-            console.error('[billing] auth/key error:', e.message);
-            return json(res, 500, { error: e.message || 'server_error' });
-        }
-    }
-
-    // GET /auth/key/consume?token=... - Handle magic link consumption
+    // GET /auth/key/consume?token=... - Handle magic link consumption (must come before /auth/key)
     if (req.method === 'GET' && req.url?.startsWith('/auth/key/consume')) {
         const url = new URL(req.url, `http://${req.headers.host}`);
         const token = url.searchParams.get('token');
@@ -449,6 +388,67 @@ const server = http.createServer(async (req, res) => {
             res.end('<h1>Server Error</h1><p>An error occurred while processing your request.</p>');
         }
         return;
+    }
+
+    // Auth endpoint: retrieve key by email
+    if (req.method === 'GET' && req.url?.startsWith('/auth/key')) {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const email = url.searchParams.get('email');
+
+        if (!email) {
+            return json(res, 400, { error: 'email parameter required' });
+        }
+
+        try {
+            // Search for ALL customers by email in Stripe (can be multiple)
+            const customers = await stripe.customers.list({ email, limit: 100 });
+
+            if (customers.data.length === 0) {
+                return json(res, 404, { error: 'no_customer_found' });
+            }
+
+            const keys = loadKeys();
+
+            // Pass 1: return first valid existing key across customers
+            for (const c of customers.data) {
+                const k = c.metadata?.ditch_api_key;
+                if (k && keys.includes(k)) {
+                    console.log('[billing] API key retrieved for email (multi-customer match):', email);
+                    return json(res, 200, { key: k });
+                }
+            }
+
+            // Pass 2: retro-provision for first customer with active subscription
+            for (const c of customers.data) {
+                try {
+                    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    if (subs.data.length > 0) {
+                        const k = c.metadata?.ditch_api_key;
+                        if (!k || !keys.includes(k)) {
+                            console.log('[billing] retro-provisioning API key for active subscriber (multi-customer)');
+                            const newKey = await provisionKeyForCustomer(c.id);
+                            return json(res, 200, { key: newKey });
+                        }
+                    }
+                } catch (e: any) {
+                    console.error('[billing] subscription check failed during retro-provision (multi-customer):', e.message);
+                }
+            }
+
+            // Optional: clean stale metadata keys that are no longer in store (best-effort)
+            for (const c of customers.data) {
+                const k = c.metadata?.ditch_api_key;
+                if (k && !keys.includes(k)) {
+                    try { await stripe.customers.update(c.id, { metadata: { ...c.metadata, ditch_api_key: '' } }); } catch { }
+                }
+            }
+
+            return json(res, 404, { error: 'no_api_key_found' });
+
+        } catch (e: any) {
+            console.error('[billing] auth/key error:', e.message);
+            return json(res, 500, { error: e.message || 'server_error' });
+        }
     }
 
     // TURN auth endpoint
