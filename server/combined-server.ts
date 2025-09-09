@@ -240,7 +240,7 @@ const server = http.createServer(async (req, res) => {
                         const sub = evt.data.object as Stripe.Subscription;
                         customerId = (sub.customer as string) || undefined;
                         const status = sub.status;
-                        if (status === 'active') {
+                        if (status === 'active' || status === 'trialing') {
                             if (customerId) {
                                 const c = await stripe.customers.retrieve(customerId) as Stripe.Customer;
                                 if (!c.metadata?.ditch_api_key) await provisionKeyForCustomer(customerId);
@@ -362,8 +362,11 @@ const server = http.createServer(async (req, res) => {
             for (const c of customers.data) {
                 try {
                     console.log(`[auth] Checking subscriptions for customer ${c.id} (email: ${c.email})`);
-                    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
-                    console.log(`[auth] Found ${subs.data.length} active subscriptions for customer ${c.id}`);
+                    // Check for both active and trialing subscriptions
+                    const activeSubs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    const trialingSubs = await stripe.subscriptions.list({ customer: c.id, status: 'trialing', limit: 1 });
+                    const subs = { data: [...activeSubs.data, ...trialingSubs.data] };
+                    console.log(`[auth] Found ${subs.data.length} active/trialing subscriptions for customer ${c.id}`);
 
                     if (subs.data.length > 0) {
                         const sub = subs.data[0];
@@ -432,10 +435,13 @@ const server = http.createServer(async (req, res) => {
                 }
             }
 
-            // Pass 2: retro-provision for first customer with active subscription
+            // Pass 2: retro-provision for first customer with active or trialing subscription
             for (const c of customers.data) {
                 try {
-                    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    // Check for both active and trialing subscriptions
+                    const activeSubs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
+                    const trialingSubs = await stripe.subscriptions.list({ customer: c.id, status: 'trialing', limit: 1 });
+                    const subs = { data: [...activeSubs.data, ...trialingSubs.data] };
                     if (subs.data.length > 0) {
                         const k = c.metadata?.ditch_api_key;
                         if (!k || !keys.includes(k)) {
