@@ -23,6 +23,9 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://ditch.chat';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM = process.env.RESEND_FROM || 'no-reply@ditch.chat';
 
+/** --- Analytics configuration for Plausible --- */
+const PLAUSIBLE_DOMAIN = process.env.PLAUSIBLE_DOMAIN || 'ditch.chat';
+
 // Where Stripe wrote user keys (email -> "sk_..." string)
 const KEYS_PATH_AUTH = path.resolve(process.cwd(), 'server/keys.json');
 
@@ -163,6 +166,10 @@ const server = http.createServer(async (req, res) => {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tunnel Chat – Your API Key</title>
+    
+    <!-- Plausible Analytics -->
+    <script defer data-domain="${PLAUSIBLE_DOMAIN}" src="https://plausible.io/js/script.js"></script>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {

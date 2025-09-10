@@ -25,6 +25,9 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://ditch.chat';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM = process.env.RESEND_FROM || 'no-reply@ditch.chat';
 
+// Analytics configuration for Plausible
+const PLAUSIBLE_DOMAIN = process.env.PLAUSIBLE_DOMAIN || 'ditch.chat';
+
 // Initialize Stripe
 const stripe = new Stripe(STRIPE_SECRET, {});
 
@@ -1206,7 +1209,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/') {
         try {
             const homePagePath = path.join(process.cwd(), 'server', 'index.html');
-            const homePage = fs.readFileSync(homePagePath, 'utf-8');
+            let homePage = fs.readFileSync(homePagePath, 'utf-8');
+
+            // Replace Plausible domain with environment variable
+            homePage = homePage.replace('data-domain="ditch.chat"', `data-domain="${PLAUSIBLE_DOMAIN}"`);
+
             res.setHeader('content-type', 'text/html');
             res.setHeader('cache-control', 'public, max-age=3600'); // Cache for 1 hour
             res.statusCode = 200;
@@ -1222,7 +1229,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/success') {
         try {
             const successPagePath = path.join(process.cwd(), 'server', 'success.html');
-            const successPage = fs.readFileSync(successPagePath, 'utf-8');
+            let successPage = fs.readFileSync(successPagePath, 'utf-8');
+
+            // Replace Plausible domain with environment variable
+            successPage = successPage.replace('data-domain="ditch.chat"', `data-domain="${PLAUSIBLE_DOMAIN}"`);
+
             res.setHeader('content-type', 'text/html');
             res.setHeader('cache-control', 'public, max-age=3600'); // Cache for 1 hour
             res.statusCode = 200;
